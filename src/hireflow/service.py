@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import and_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.db import set_tenant_context
 from hireflow.domain import ACTIVE_STATUSES, InterviewStatus, can_transition, overlaps
 from hireflow.models import Candidate, Interview, InterviewAudit, Job, OutboxEvent, User
+from hireflow.pagination import PageCursor
 from hireflow.recruiting import InvalidReference
 from hireflow.schemas import DashboardInterviewRead, InterviewCreate, InterviewStatusUpdate
 
@@ -166,16 +167,25 @@ async def list_audits(session: AsyncSession, tenant_id: UUID, interview_id: UUID
 
 
 async def list_interviews(
-    session: AsyncSession, tenant_id: UUID, limit: int = 100
+    session: AsyncSession,
+    tenant_id: UUID,
+    *,
+    limit: int,
+    cursor: PageCursor | None = None,
 ) -> list[DashboardInterviewRead]:
-    rows = await session.execute(
+    query = (
         select(Interview, Candidate.full_name, User.display_name, Job.title)
         .join(Candidate, Candidate.id == Interview.candidate_id)
         .join(User, User.id == Interview.interviewer_id)
         .join(Job, Job.id == Interview.job_id)
         .where(Interview.tenant_id == tenant_id)
-        .order_by(Interview.starts_at.desc())
-        .limit(limit)
+    )
+    if cursor is not None:
+        query = query.where(
+            tuple_(Interview.starts_at, Interview.id) < (cursor.created_at, cursor.item_id)
+        )
+    rows = await session.execute(
+        query.order_by(Interview.starts_at.desc(), Interview.id.desc()).limit(limit + 1)
     )
     return [
         DashboardInterviewRead(

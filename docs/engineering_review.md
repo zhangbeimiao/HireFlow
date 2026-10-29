@@ -56,6 +56,6 @@
 
 ## 阶段五：分页与查询计划治理
 
-- 职位、候选人列表使用 `(created_at, id)` Keyset 游标，默认 20、最大 100；保持数组响应兼容工作台，并以 `X-Next-Cursor` 暴露下一页边界。
+- 职位、候选人、面试和通知列表使用“排序时间 + ID”的 Keyset 游标，默认 20、最大 100；保持数组响应兼容工作台，并以 `X-Next-Cursor` 暴露下一页边界。
 - 默认首页进入 Cache Aside；游标页和非默认页大小走 PostgreSQL，控制缓存 Key 数量与写后失效复杂度。
-- Alembic 增加 `(tenant_id, created_at DESC, id DESC)` 复合索引。验收脚本以每表 5000 条事务内数据运行 `EXPLAIN (ANALYZE, BUFFERS)`，两个查询均命中目标索引，随后回滚样本。
+- Alembic 为四类列表增加租户与排序字段复合索引。验收脚本以每类 5000 条事务内数据运行 `EXPLAIN (ANALYZE, BUFFERS)`，真实 SQLAlchemy 查询形状均命中目标索引，随后回滚样本并刷新基表统计信息。

@@ -9,7 +9,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.staticfiles import StaticFiles
 
@@ -163,13 +163,24 @@ def _decode_page_cursor(value: str | None) -> PageCursor | None:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
-def _page_response(items: list[dict[str, Any]], limit: int, response: Response) -> list[dict[str, Any]]:
+def _page_value(item: Any, field: str) -> Any:
+    if isinstance(item, dict):
+        return item[field]
+    return getattr(item, field)
+
+
+def _page_response(
+    items: list[Any], limit: int, response: Response, *, timestamp_field: str = "created_at"
+) -> list[Any]:
     page = items[:limit]
     response.headers["X-Page-Limit"] = str(limit)
     if len(items) > limit and page:
         last = page[-1]
+        timestamp = _page_value(last, timestamp_field)
+        if isinstance(timestamp, str):
+            timestamp = datetime.fromisoformat(timestamp)
         response.headers["X-Next-Cursor"] = encode_cursor(
-            datetime.fromisoformat(last["created_at"]), UUID(last["id"])
+            timestamp, UUID(str(_page_value(last, "id")))
         )
     return page
 
@@ -466,11 +477,16 @@ async def schedule_interview(
 
 @app.get("/v1/interviews", response_model=list[DashboardInterviewRead])
 async def get_interviews(
+    response: Response,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
     session: AsyncSession = Depends(tenant_session),
 ) -> list[DashboardInterviewRead]:
-    return await list_interviews(session, tenant_id)
+    page_cursor = _decode_page_cursor(cursor)
+    rows = await list_interviews(session, tenant_id, limit=limit, cursor=page_cursor)
+    return _page_response(rows, limit, response, timestamp_field="starts_at")
 
 
 @app.post("/v1/interviews/{interview_id}/status", response_model=InterviewRead)
@@ -522,16 +538,24 @@ async def get_interview(
 
 @app.get("/v1/notifications", response_model=list[NotificationRead])
 async def list_notifications(
+    response: Response,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
     session: AsyncSession = Depends(tenant_session),
 ):
+    page_cursor = _decode_page_cursor(cursor)
+    query = select(Notification).where(Notification.tenant_id == tenant_id)
+    if page_cursor is not None:
+        query = query.where(
+            tuple_(Notification.created_at, Notification.id)
+            < (page_cursor.created_at, page_cursor.item_id)
+        )
     rows = await session.scalars(
-        select(Notification)
-        .where(Notification.tenant_id == tenant_id)
-        .order_by(Notification.created_at.desc())
+        query.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit + 1)
     )
-    return list(rows)
+    return _page_response(list(rows), limit, response)
 
 
 @app.get("/v1/admin/notification-failures", response_model=list[NotificationFailureRead])
