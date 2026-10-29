@@ -36,7 +36,9 @@ _lookup_lock = Lock()
 def list_cache_key(resource: str, tenant_id: UUID) -> str:
     """The tenant id is part of every key, preventing cross-tenant cache sharing."""
 
-    return f"hireflow:cache:v1:tenant:{tenant_id}:{resource}:list"
+    # Bump the namespace when a cached response schema changes. Job/Candidate list items gained
+    # created_at for cursor pagination, so v2 cannot read stale v1 payloads after a deployment.
+    return f"hireflow:cache:v2:tenant:{tenant_id}:{resource}:list"
 
 
 def _record_lookup(resource: str, outcome: str) -> None:

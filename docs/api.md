@@ -76,22 +76,26 @@ Content-Type: application/json
 | POST | `/v1/users` | Owner | 创建 Recruiter、Hiring Manager 或 Interviewer。 |
 | GET | `/v1/users` | Owner / Recruiter / Hiring Manager | 查询当前租户成员，供排期选择面试官。 |
 | POST | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 创建职位。 |
-| GET | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 查询当前租户职位。 |
+| GET | `/v1/jobs?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 按创建时间与 ID 倒序游标分页查询当前租户职位。 |
 | PATCH | `/v1/jobs/{job_id}` | Owner / Recruiter / Hiring Manager | 更新职位并使当前租户职位缓存失效。 |
 | POST | `/v1/candidates` | Owner / Recruiter | 创建候选人。 |
-| GET | `/v1/candidates` | Owner / Recruiter / Hiring Manager | 查询当前租户候选人。 |
+| GET | `/v1/candidates?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 按创建时间与 ID 倒序游标分页查询当前租户候选人。 |
 | PATCH | `/v1/candidates/{candidate_id}` | Owner / Recruiter | 更新候选人并使当前租户候选人缓存失效。 |
 | POST | `/v1/applications` | Owner / Recruiter | 候选人与职位关联。 |
 
 ### 列表缓存语义
 
-`GET /v1/jobs` 与 `GET /v1/candidates` 使用 Redis Cache Aside：Key 包含 JWT 中的 `tenant_id`，默认 TTL 为 60 秒；创建或更新成功提交 PostgreSQL 后，只删除当前租户对应的列表 Key。响应头 `X-Cache` 的值为：
+`GET /v1/jobs` 与 `GET /v1/candidates` 默认 `limit=20`，最大 100。响应仍为数组；若存在下一页，服务端通过 `X-Next-Cursor` 返回不透明游标，客户端原样传给下一次请求。`X-Page-Limit` 表示本次页大小。无法解析或结构非法的游标返回 `422`。
+
+排序键为 `(created_at DESC, id DESC)`，游标同时编码这两个字段，因此即使多条记录创建时间相同，翻页仍保持确定顺序且不会重复。该方案不会像深分页 `OFFSET` 一样扫描并丢弃前 N 行。
+
+默认第一页使用 Redis Cache Aside：Key 包含 JWT 中的 `tenant_id`，默认 TTL 为 60 秒；创建或更新成功提交 PostgreSQL 后，只删除当前租户对应的首页 Key。游标页和自定义页大小绕过缓存，避免维护不受控的多页缓存 Key。响应头 `X-Cache` 的值为：
 
 | 值 | 含义 |
 | --- | --- |
 | `HIT` | Redis 命中，不创建 PostgreSQL 会话。 |
 | `MISS` | Redis 未命中，从 PostgreSQL 回源并写入 TTL 缓存。 |
-| `BYPASS` | 请求携带 `Cache-Control: no-cache`，用于强制读取数据库。 |
+| `BYPASS` | 请求携带 `Cache-Control: no-cache`，或请求游标页/自定义页大小，直接读取数据库。 |
 | `ERROR` | Redis 不可用，服务降级读取 PostgreSQL。 |
 
 Prometheus 暴露 `hireflow_cache_requests_total`、`hireflow_cache_hit_ratio`、`hireflow_cache_db_load_duration_seconds` 和 `hireflow_cache_invalidations_total`。命中率也可由 hit/miss Counter 在 PromQL 中按窗口计算。

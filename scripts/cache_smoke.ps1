@@ -70,7 +70,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     if (-not (Test-Path $candidateDocker)) { throw "Docker CLI was not found" }
     $docker = $candidateDocker
 }
-$key = "hireflow:cache:v1:tenant:$($job.tenant_id):jobs:list"
+$key = "hireflow:cache:v2:tenant:$($job.tenant_id):jobs:list"
 $ttl = & $docker compose exec -T redis redis-cli TTL $key
 if ($LASTEXITCODE -ne 0 -or [int]$ttl -lt 1 -or [int]$ttl -gt 60) {
     throw "jobs cache TTL was outside the expected 1..60 second range: $ttl"

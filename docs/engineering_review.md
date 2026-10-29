@@ -53,3 +53,9 @@
 - 热缓存命中路径不建立 PostgreSQL 会话；MISS、显式 `Cache-Control: no-cache` 或 Redis 故障才执行 RLS 约束下的数据库查询。Redis 读取异常 fail-open，业务正确性仍由 PostgreSQL 保证。
 - Prometheus 记录 hit/miss/error/bypass、进程内命中率、数据库回源耗时和失效结果。单元测试覆盖 MISS→HIT、TTL、失效、跨租户 Key 与 Redis 故障降级。
 - 一次本机 Locust 快照（10 用户、每类 20 条数据、每阶段 5 秒）中，数据库回源约 `208 RPS / P95 44ms / P99 100ms`，热缓存约 `295 RPS / P95 28ms / P99 48ms`。数据用于同环境回归，不外推为生产容量。
+
+## 阶段五：分页与查询计划治理
+
+- 职位、候选人列表使用 `(created_at, id)` Keyset 游标，默认 20、最大 100；保持数组响应兼容工作台，并以 `X-Next-Cursor` 暴露下一页边界。
+- 默认首页进入 Cache Aside；游标页和非默认页大小走 PostgreSQL，控制缓存 Key 数量与写后失效复杂度。
+- Alembic 增加 `(tenant_id, created_at DESC, id DESC)` 复合索引。验收脚本以每表 5000 条事务内数据运行 `EXPLAIN (ANALYZE, BUFFERS)`，两个查询均命中目标索引，随后回滚样本。

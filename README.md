@@ -14,7 +14,7 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **可靠通知**：事务内写 Outbox；Relay 用 `FOR UPDATE SKIP LOCKED` 发布事件；Inbox 按 `(consumer_name, event_id)` 幂等消费，支持重试、DLQ 和 Owner 重放。
-- **缓存与运行保护**：职位、候选人列表采用租户级 Redis Cache Aside，写后失效并设置 TTL；Redis 同时承担固定窗口限流，请求 ID、结构化日志和 Prometheus 指标覆盖运行状态。
+- **查询与缓存治理**：职位、候选人列表采用稳定的 Keyset/Cursor 分页与 `(tenant_id, created_at DESC, id DESC)` 复合索引；默认热点首页使用租户级 Redis Cache Aside，写后失效并设置 TTL。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、新建职位、录入候选人和安排面试；排期冲突在页面直观呈现为 `409 Conflict`，Swagger 保留为开发者接口文档。
 
 ## 架构
@@ -68,6 +68,8 @@ python -m pytest -q
 .\scripts\reliability_smoke.ps1
 .\scripts\rls_smoke.ps1
 .\scripts\cache_smoke.ps1
+.\scripts\pagination_smoke.ps1
+.\scripts\explain_analyze.ps1
 # 需要先执行 python -m pip install -e ".[dev]"，默认 20 个并发用户
 .\scripts\load_test.ps1 -Users 20 -SpawnRate 10
 # 对比强制 PostgreSQL 回源与 Redis 热缓存的 RPS、P95、P99
@@ -87,9 +89,13 @@ python -m pytest -q
 | `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |
 | `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
 | `cache_smoke.ps1` | 验证职位/候选人列表 MISS→HIT、创建/更新后失效、租户级 Key、TTL 与缓存指标。 |
+| `pagination_smoke.ps1` | 验证职位/候选人 Keyset 分页 `20 + 3` 条无重复遗漏、非法游标 `422` 及首页缓存策略。 |
+| `explain_analyze.ps1` | 事务内生成每表 5000 条数据，验证游标查询命中租户复合索引并回滚测试数据。 |
 | `cache_performance.ps1` | Locust 对比 `Cache-Control: no-cache` 数据库回源与热缓存，输出 RPS、P95、P99。 |
 
 一次本机快照（10 用户、每类 20 条数据、每阶段 5 秒）中，热缓存相对数据库回源的吞吐由约 `208 RPS` 提升到 `295 RPS`，P95 从 `44ms` 降至 `28ms`，P99 从 `100ms` 降至 `48ms`。该数据仅用于同机型回归对比，不代表生产容量。
+
+分页采用 `(created_at, id)` 作为稳定游标，避免深分页 `OFFSET` 随偏移量增长而扫描和丢页。在每表 5000 条事务内样本上，`EXPLAIN (ANALYZE, BUFFERS)` 均选择复合索引扫描：职位查询约 `0.072ms`，候选人查询约 `0.028ms`，每个执行阶段命中 3 个共享缓冲页。完整计划见 [查询性能记录](docs/query_performance.md)，数值仅用于证明执行计划与回归对比。
 
 ## 关键一致性约束
 

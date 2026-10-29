@@ -84,6 +84,14 @@ jobs:
         shell: pwsh
         run: ./scripts/cache_smoke.ps1
 
+      - name: Verify keyset pagination
+        shell: pwsh
+        run: ./scripts/pagination_smoke.ps1
+
+      - name: Verify pagination indexes with EXPLAIN ANALYZE
+        shell: pwsh
+        run: ./scripts/explain_analyze.ps1
+
       - name: Compare PostgreSQL and warmed-cache list performance
         shell: pwsh
         run: ./scripts/cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 5 -ItemsPerList 10

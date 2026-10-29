@@ -2,13 +2,14 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.auth import hash_password, verify_password
 from hireflow.db import set_tenant_context
 from hireflow.models import Application, Candidate, Job, Tenant, User
+from hireflow.pagination import PageCursor
 from hireflow.schemas import (
     ApplicationCreate,
     CandidateCreate,
@@ -111,9 +112,14 @@ async def create_job(session: AsyncSession, tenant_id: UUID, payload: JobCreate)
     return job
 
 
-async def list_jobs(session: AsyncSession, tenant_id: UUID) -> list[Job]:
+async def list_jobs(
+    session: AsyncSession, tenant_id: UUID, *, limit: int, cursor: PageCursor | None = None
+) -> list[Job]:
+    query = select(Job).where(Job.tenant_id == tenant_id)
+    if cursor is not None:
+        query = query.where(tuple_(Job.created_at, Job.id) < (cursor.created_at, cursor.item_id))
     rows = await session.scalars(
-        select(Job).where(Job.tenant_id == tenant_id).order_by(Job.created_at.desc())
+        query.order_by(Job.created_at.desc(), Job.id.desc()).limit(limit + 1)
     )
     return list(rows)
 
@@ -146,9 +152,16 @@ async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: Cand
     return candidate
 
 
-async def list_candidates(session: AsyncSession, tenant_id: UUID) -> list[Candidate]:
+async def list_candidates(
+    session: AsyncSession, tenant_id: UUID, *, limit: int, cursor: PageCursor | None = None
+) -> list[Candidate]:
+    query = select(Candidate).where(Candidate.tenant_id == tenant_id)
+    if cursor is not None:
+        query = query.where(
+            tuple_(Candidate.created_at, Candidate.id) < (cursor.created_at, cursor.item_id)
+        )
     rows = await session.scalars(
-        select(Candidate).where(Candidate.tenant_id == tenant_id).order_by(Candidate.created_at.desc())
+        query.order_by(Candidate.created_at.desc(), Candidate.id.desc()).limit(limit + 1)
     )
     return list(rows)
 

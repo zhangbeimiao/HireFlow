@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -44,6 +45,7 @@ def job(tenant_id: UUID, title: str = "Backend Engineer") -> SimpleNamespace:
         title=title,
         hiring_manager_id=None,
         status="open",
+        created_at=datetime(2026, 10, 29, tzinfo=UTC),
     )
 
 

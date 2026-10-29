@@ -1,9 +1,11 @@
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
@@ -23,6 +25,14 @@ from hireflow.db import engine, get_session, get_tenant_session, tenant_session_
 from hireflow.models import Base, Interview, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
 from hireflow.observability import begin_request, finish_request
+from hireflow.pagination import (
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+    InvalidCursor,
+    PageCursor,
+    decode_cursor,
+    encode_cursor,
+)
 from hireflow.rate_limit import enforce_rate_limit
 from hireflow.recruiting import (
     DuplicateResource,
@@ -144,6 +154,26 @@ async def tenant_session(principal: Principal = Depends(current_principal)):
         yield session
 
 
+def _decode_page_cursor(value: str | None) -> PageCursor | None:
+    if value is None:
+        return None
+    try:
+        return decode_cursor(value)
+    except InvalidCursor as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _page_response(items: list[dict[str, Any]], limit: int, response: Response) -> list[dict[str, Any]]:
+    page = items[:limit]
+    response.headers["X-Page-Limit"] = str(limit)
+    if len(items) > limit and page:
+        last = page[-1]
+        response.headers["X-Next-Cursor"] = encode_cursor(
+            datetime.fromisoformat(last["created_at"]), UUID(last["id"])
+        )
+    return page
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -224,12 +254,16 @@ async def register_job(
 async def get_jobs(
     request: Request,
     response: Response,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
 ) -> list[JobRead]:
+    page_cursor = _decode_page_cursor(cursor)
+
     async def load_jobs():
         async with tenant_session_scope(tenant_id) as session:
-            rows = await list_jobs(session, tenant_id)
+            rows = await list_jobs(session, tenant_id, limit=limit, cursor=page_cursor)
             return [
                 JobRead.model_validate(row, from_attributes=True).model_dump(mode="json")
                 for row in rows
@@ -242,10 +276,14 @@ async def get_jobs(
         schema=JobRead,
         loader=load_jobs,
         ttl_seconds=request.app.state.cache_ttl_seconds,
-        bypass="no-cache" in request.headers.get("Cache-Control", "").lower(),
+        bypass=(
+            "no-cache" in request.headers.get("Cache-Control", "").lower()
+            or page_cursor is not None
+            or limit != DEFAULT_PAGE_SIZE
+        ),
     )
     response.headers["X-Cache"] = result.outcome
-    return result.items
+    return _page_response(result.items, limit, response)
 
 
 @app.patch("/v1/jobs/{job_id}", response_model=JobRead)
@@ -289,12 +327,16 @@ async def register_candidate(
 async def get_candidates(
     request: Request,
     response: Response,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
 ) -> list[CandidateRead]:
+    page_cursor = _decode_page_cursor(cursor)
+
     async def load_candidates():
         async with tenant_session_scope(tenant_id) as session:
-            rows = await list_candidates(session, tenant_id)
+            rows = await list_candidates(session, tenant_id, limit=limit, cursor=page_cursor)
             return [
                 CandidateRead.model_validate(row, from_attributes=True).model_dump(mode="json")
                 for row in rows
@@ -307,10 +349,14 @@ async def get_candidates(
         schema=CandidateRead,
         loader=load_candidates,
         ttl_seconds=request.app.state.cache_ttl_seconds,
-        bypass="no-cache" in request.headers.get("Cache-Control", "").lower(),
+        bypass=(
+            "no-cache" in request.headers.get("Cache-Control", "").lower()
+            or page_cursor is not None
+            or limit != DEFAULT_PAGE_SIZE
+        ),
     )
     response.headers["X-Cache"] = result.outcome
-    return result.items
+    return _page_response(result.items, limit, response)
 
 
 @app.patch("/v1/candidates/{candidate_id}", response_model=CandidateRead)

@@ -123,6 +123,7 @@ class JobRead(JobCreate):
     id: UUID
     tenant_id: UUID
     status: str
+    created_at: datetime
 
 
 class CandidateCreate(BaseModel):
@@ -149,6 +150,7 @@ class CandidateUpdate(BaseModel):
 class CandidateRead(CandidateCreate):
     id: UUID
     tenant_id: UUID
+    created_at: datetime
 
 
 class ApplicationCreate(BaseModel):
