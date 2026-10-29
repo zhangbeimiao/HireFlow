@@ -8,6 +8,56 @@ Authorization: Bearer <access_token>
 
 Token 包含用户、企业和角色声明；服务端不以客户端传入的 `tenant_id` 作为授权依据。
 
+## 调用示例
+
+### 初始化企业并获取 Owner Token
+
+```http
+POST /v1/auth/bootstrap
+Content-Type: application/json
+
+{
+  "tenant_name": "Acme",
+  "owner": {
+    "email": "owner@acme.example",
+    "display_name": "Alice",
+    "role": "owner",
+    "password": "replace-with-a-strong-local-password"
+  }
+}
+```
+
+成功返回 `201 Created`，响应中的 `access_token` 用于后续请求：
+
+```json
+{"access_token":"<jwt>","token_type":"bearer"}
+```
+
+### 创建面试
+
+```http
+POST /v1/interviews
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "candidate_id": "11111111-1111-1111-1111-111111111111",
+  "interviewer_id": "22222222-2222-2222-2222-222222222222",
+  "job_id": "33333333-3333-3333-3333-333333333333",
+  "starts_at": "2026-11-05T10:00:00+08:00",
+  "ends_at": "2026-11-05T10:30:00+08:00"
+}
+```
+
+创建成功返回 `201 Created`。若另一请求已为同一面试官占用重叠时段，则返回：
+
+```http
+409 Conflict
+{"detail":"interviewer already has an overlapping active interview"}
+```
+
+这说明推荐时段仅是读模型结果，最终排期由 PostgreSQL 排他约束裁决。
+
 ## 认证与招聘实体
 
 | Method | Path | 权限 | 说明 |

@@ -30,12 +30,17 @@ Client → FastAPI (JWT/RBAC, Redis rate limit, request ID) → PostgreSQL
 
 更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)。
 
+## 运行截图
+
+真实运行截图的采集步骤与脱敏要求见 [截图说明](docs/screenshots/README.md)。建议至少展示 Docker 服务栈、Swagger、RabbitMQ 队列、Prometheus 指标及并发排期 `201/409` 结果。
+
 ## 快速启动
 
 ```powershell
 cd D:\Projects\hireflow
 .\.venv\Scripts\Activate.ps1
 docker compose up --build -d
+.\scripts\stack_smoke.ps1
 ```
 
 - Swagger UI：`http://127.0.0.1:8000/docs`
@@ -50,6 +55,7 @@ python -m ruff check src tests migrations
 python -m pytest -q
 
 .\scripts\demo.ps1
+.\scripts\stack_smoke.ps1
 .\scripts\security_smoke.ps1
 .\scripts\rate_limit_smoke.ps1
 .\scripts\observability_smoke.ps1
@@ -59,6 +65,7 @@ python -m pytest -q
 | 脚本 | 验证结果 |
 | --- | --- |
 | `demo.ps1` | 创建招聘流程、排期、确认状态和 4 条站内通知。 |
+| `stack_smoke.ps1` | 检查 Compose 关键服务处于运行态，并验证 API `/health`。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
 | `observability_smoke.ps1` | `X-Request-ID` 回传，Prometheus HTTP 指标暴露。 |
@@ -80,3 +87,5 @@ EXCLUDE USING gist (
 - 通知为站内信模拟，尚未接入真实邮件供应商。
 - Redis 当前用于限流，不承担排期正确性。
 - 指标已暴露，尚未接入 Grafana 仪表盘与告警系统。
+
+下一轮工程化优先级见 [工程审查记录](docs/engineering_review.md)。
