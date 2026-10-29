@@ -81,14 +81,42 @@ if ($suggestionA.starts_at -ne $suggestionB.starts_at) {
 $startInterview = {
     param($url, $json, $authorization)
     try {
-        $response = Invoke-WebRequest -Method Post -Uri "$url/v1/interviews" `
-            -ContentType "application/json" -Headers @{ Authorization = $authorization } `
-            -Body $json -UseBasicParsing -ErrorAction Stop
-        [PSCustomObject]@{ status = [int]$response.StatusCode; body = $response.Content }
+        # Avoid Invoke-WebRequest inside a Windows PowerShell background job: it may wait for
+        # interactive browser/proxy initialization. These requests must stay local and noninteractive.
+        $request = [System.Net.HttpWebRequest]::Create("$url/v1/interviews")
+        $request.Method = "POST"
+        $request.ContentType = "application/json"
+        $request.Headers["Authorization"] = $authorization
+        $request.Proxy = $null
+        $request.Timeout = 30000
+
+        $payload = [System.Text.Encoding]::UTF8.GetBytes($json)
+        $request.ContentLength = $payload.Length
+        $requestStream = $request.GetRequestStream()
+        try {
+            $requestStream.Write($payload, 0, $payload.Length)
+        }
+        finally {
+            $requestStream.Dispose()
+        }
+
+        $response = $request.GetResponse()
+        try {
+            [PSCustomObject]@{ status = [int]$response.StatusCode; body = "" }
+        }
+        finally {
+            $response.Dispose()
+        }
     }
-    catch {
-        if ($null -eq $_.Exception.Response) { throw }
-        [PSCustomObject]@{ status = [int]$_.Exception.Response.StatusCode; body = "" }
+    catch [System.Net.WebException] {
+        $response = $_.Exception.Response
+        if ($null -eq $response) { throw }
+        try {
+            [PSCustomObject]@{ status = [int]$response.StatusCode; body = "" }
+        }
+        finally {
+            $response.Dispose()
+        }
     }
 }
 
