@@ -1,0 +1,14 @@
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
+
+$docker = "docker"
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    $candidate = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+    if (-not (Test-Path $candidate)) { throw "Docker CLI was not found. Start Docker Desktop first." }
+    $docker = $candidate
+}
+
+# The worker has the cross-tenant service credential and runs against the same PostgreSQL data as
+# the relay/consumer. A real interview is required as the message aggregate.
+& $docker compose exec -T worker python -m hireflow.reliability_smoke
+if ($LASTEXITCODE -ne 0) { throw "reliability smoke failed with exit code $LASTEXITCODE" }

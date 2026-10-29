@@ -29,7 +29,6 @@ async def add_candidate_availability(
     availability = CandidateAvailability(tenant_id=tenant_id, candidate_id=candidate_id, **payload.model_dump())
     session.add(availability)
     await session.commit()
-    await session.refresh(availability)
     return availability
 
 
@@ -47,7 +46,6 @@ async def add_interviewer_availability(
     )
     session.add(availability)
     await session.commit()
-    await session.refresh(availability)
     return availability
 
 

@@ -1,12 +1,13 @@
 """Tenant-scoped recruiting workflow commands."""
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.auth import hash_password, verify_password
+from hireflow.db import set_tenant_context
 from hireflow.models import Application, Candidate, Job, Tenant, User
 from hireflow.schemas import (
     ApplicationCreate,
@@ -50,23 +51,26 @@ async def create_tenant(session: AsyncSession, payload: TenantCreate) -> Tenant:
     tenant = Tenant(name=payload.name)
     session.add(tenant)
     await _commit(session)
-    await session.refresh(tenant)
     return tenant
 
 
 async def bootstrap_tenant(session: AsyncSession, payload: TenantBootstrap) -> User:
-    tenant = Tenant(name=payload.tenant_name)
+    # Generate the UUID before INSERT so PostgreSQL RLS also permits the INSERT ... RETURNING row.
+    tenant = Tenant(id=uuid4(), name=payload.tenant_name)
+    await set_tenant_context(session, tenant.id)
     session.add(tenant)
     await session.flush()
     values = payload.owner.model_dump(exclude={"password"})
     owner = User(tenant_id=tenant.id, password_hash=hash_password(payload.owner.password), **values)
     session.add(owner)
     await _commit(session)
-    await session.refresh(owner)
     return owner
 
 
 async def authenticate(session: AsyncSession, payload: LoginRequest) -> User | None:
+    # Login contains a tenant id, which is enough to establish the least-privilege RLS scope
+    # before looking up the user's password hash.
+    await set_tenant_context(session, payload.tenant_id)
     user = await session.scalar(
         select(User).where(User.tenant_id == payload.tenant_id, User.email == payload.email)
     )
@@ -81,7 +85,6 @@ async def create_user(session: AsyncSession, tenant_id: UUID, payload: UserCreat
     user = User(tenant_id=tenant_id, password_hash=hash_password(payload.password), **values)
     session.add(user)
     await _commit(session)
-    await session.refresh(user)
     return user
 
 
@@ -103,7 +106,6 @@ async def create_job(session: AsyncSession, tenant_id: UUID, payload: JobCreate)
     job = Job(tenant_id=tenant_id, **payload.model_dump())
     session.add(job)
     await _commit(session)
-    await session.refresh(job)
     return job
 
 
@@ -119,7 +121,6 @@ async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: Cand
     candidate = Candidate(tenant_id=tenant_id, **payload.model_dump())
     session.add(candidate)
     await _commit(session)
-    await session.refresh(candidate)
     return candidate
 
 
@@ -143,5 +144,4 @@ async def create_application(
     application = Application(tenant_id=tenant_id, **payload.model_dump())
     session.add(application)
     await _commit(session)
-    await session.refresh(application)
     return application

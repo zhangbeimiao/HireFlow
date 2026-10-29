@@ -6,15 +6,15 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 
 ## 技术栈
 
-`Python 3.11+` · `FastAPI` · `PostgreSQL 16` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `Docker Compose` · `pytest` · `Prometheus`
+`Python 3.11+` · `FastAPI` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `Docker Compose` · `pytest` · `Locust` · `Prometheus`
 
 ## 已实现能力
 
-- **多租户与权限**：JWT 签发 `tenant_id` 与角色；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，跨租户资源返回 `404`。
+- **多租户与权限**：JWT 签发 `tenant_id` 与角色；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，跨租户资源返回 `404`；API 采用受限数据库账号，PostgreSQL RLS 作为数据隔离最终防线。
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **可靠通知**：事务内写 Outbox；Relay 用 `FOR UPDATE SKIP LOCKED` 发布事件；Inbox 按 `(consumer_name, event_id)` 幂等消费，支持重试、DLQ 和 Owner 重放。
-- **运行保护**：Redis 固定窗口限流；请求 ID、JSON 结构化访问日志和 Prometheus 指标。
+- **运行保护**：Redis 固定窗口限流；请求 ID、JSON 结构化访问日志和 Prometheus 指标；Locust 压测保留吞吐、P95/P99 与唯一时段竞争结果。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、新建职位、录入候选人和安排面试；排期冲突在页面直观呈现为 `409 Conflict`，Swagger 保留为开发者接口文档。
 
 ## 架构
@@ -65,6 +65,10 @@ python -m pytest -q
 .\scripts\rate_limit_smoke.ps1
 .\scripts\observability_smoke.ps1
 .\scripts\concurrency_smoke.ps1
+.\scripts\reliability_smoke.ps1
+.\scripts\rls_smoke.ps1
+# 需要先执行 python -m pip install -e ".[dev]"，默认 20 个并发用户
+.\scripts\load_test.ps1 -Users 20 -SpawnRate 10
 ```
 
 | 脚本 | 验证结果 |
@@ -76,6 +80,9 @@ python -m pytest -q
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
 | `observability_smoke.ps1` | `X-Request-ID` 回传，Prometheus HTTP 指标暴露。 |
 | `concurrency_smoke.ps1` | 两位候选人并发抢唯一时段：恰好一个 `201`、一个 `409`。 |
+| `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
+| `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |
+| `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
 
 ## 关键一致性约束
 

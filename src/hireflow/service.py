@@ -4,6 +4,7 @@ from sqlalchemy import and_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from hireflow.db import set_tenant_context
 from hireflow.domain import ACTIVE_STATUSES, InterviewStatus, can_transition, overlaps
 from hireflow.models import Candidate, Interview, InterviewAudit, Job, OutboxEvent, User
 from hireflow.recruiting import InvalidReference
@@ -64,37 +65,39 @@ async def create_interview(
         status=InterviewStatus.SCHEDULED.value,
     )
     session.add(interview)
-    await session.flush()
-    session.add(
-        InterviewAudit(
-            interview_id=interview.id,
-            from_status=None,
-            to_status=InterviewStatus.SCHEDULED.value,
-            reason="interview scheduled",
-        )
-    )
-    session.add(
-        OutboxEvent(
-            tenant_id=tenant_id,
-            aggregate_id=interview.id,
-            event_type="interview.scheduled",
-            payload={
-                "interview_id": str(interview.id),
-                "candidate_id": str(interview.candidate_id),
-                "interviewer_id": str(interview.interviewer_id),
-                "starts_at": interview.starts_at.isoformat(),
-                "ends_at": interview.ends_at.isoformat(),
-            },
-        )
-    )
     try:
+        # A PostgreSQL exclusion violation is raised by flush (the INSERT), not necessarily by
+        # commit. Keep the entire write unit inside this boundary so every racing request gets
+        # the public 409 contract instead of leaking an IntegrityError as HTTP 500.
+        await session.flush()
+        session.add(
+            InterviewAudit(
+                interview_id=interview.id,
+                from_status=None,
+                to_status=InterviewStatus.SCHEDULED.value,
+                reason="interview scheduled",
+            )
+        )
+        session.add(
+            OutboxEvent(
+                tenant_id=tenant_id,
+                aggregate_id=interview.id,
+                event_type="interview.scheduled",
+                payload={
+                    "interview_id": str(interview.id),
+                    "candidate_id": str(interview.candidate_id),
+                    "interviewer_id": str(interview.interviewer_id),
+                    "starts_at": interview.starts_at.isoformat(),
+                    "ends_at": interview.ends_at.isoformat(),
+                },
+            )
+        )
         await session.commit()
     except IntegrityError as error:
         # The exclusion constraint is the final authority when two application instances
         # pass the read-time probe concurrently. Keep its database error behind one 409 contract.
         await session.rollback()
         raise SchedulingConflict("interviewer already has an overlapping active interview") from error
-    await session.refresh(interview)
     return interview
 
 
@@ -146,6 +149,8 @@ async def transition_interview(
         )
     )
     await session.commit()
+    # A committed session may check out another pooled connection for this read.
+    await set_tenant_context(session, tenant_id)
     return await session.scalar(select(Interview).where(Interview.id == interview_id))
 
 

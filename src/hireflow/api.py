@@ -18,7 +18,7 @@ from hireflow.availability import (
     suggest_earliest_slot,
 )
 from hireflow.dashboard import dashboard_overview
-from hireflow.db import engine, get_session
+from hireflow.db import engine, get_session, get_tenant_session
 from hireflow.models import Base, Candidate, Interview, Job, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
 from hireflow.observability import begin_request, finish_request
@@ -131,6 +131,11 @@ def current_tenant(principal: Principal = Depends(current_principal)) -> UUID:
     return principal.tenant_id
 
 
+async def tenant_session(principal: Principal = Depends(current_principal)):
+    async for session in get_tenant_session(principal.tenant_id):
+        yield session
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -143,7 +148,7 @@ async def workbench() -> FileResponse:
 
 @app.get("/v1/dashboard/overview", response_model=DashboardOverviewRead)
 async def get_dashboard_overview(
-    tenant_id: UUID = Depends(current_tenant), session: AsyncSession = Depends(get_session)
+    tenant_id: UUID = Depends(current_tenant), session: AsyncSession = Depends(tenant_session)
 ) -> DashboardOverviewRead:
     return await dashboard_overview(session, tenant_id)
 
@@ -172,7 +177,7 @@ async def register_user(
     payload: UserCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await create_user(session, tenant_id, payload)
@@ -186,7 +191,7 @@ async def register_user(
 async def get_users(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> list[User]:
     return await list_users(session, tenant_id)
 
@@ -196,7 +201,7 @@ async def register_job(
     payload: JobCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await create_job(session, tenant_id, payload)
@@ -208,7 +213,7 @@ async def register_job(
 async def get_jobs(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> list[Job]:
     return await list_jobs(session, tenant_id)
 
@@ -218,7 +223,7 @@ async def register_candidate(
     payload: CandidateCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await create_candidate(session, tenant_id, payload)
@@ -232,7 +237,7 @@ async def register_candidate(
 async def get_candidates(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> list[Candidate]:
     return await list_candidates(session, tenant_id)
 
@@ -242,7 +247,7 @@ async def submit_application(
     payload: ApplicationCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await create_application(session, tenant_id, payload)
@@ -262,7 +267,7 @@ async def submit_candidate_availability(
     payload: AvailabilityCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await add_candidate_availability(session, tenant_id, candidate_id, payload)
@@ -282,7 +287,7 @@ async def submit_interviewer_availability(
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
     ),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         return await add_interviewer_availability(session, tenant_id, interviewer_id, payload)
@@ -295,7 +300,7 @@ async def scheduling_suggestion(
     payload: ScheduleSuggestionRequest,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     try:
         slot = await suggest_earliest_slot(
@@ -313,7 +318,7 @@ async def schedule_interview(
     payload: InterviewCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
     try:
         return await create_interview(session, tenant_id, payload)
@@ -325,7 +330,7 @@ async def schedule_interview(
 async def get_interviews(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> list[DashboardInterviewRead]:
     return await list_interviews(session, tenant_id)
 
@@ -338,7 +343,7 @@ async def update_status(
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
     ),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
     try:
         return await transition_interview(session, tenant_id, interview_id, payload)
@@ -355,7 +360,7 @@ async def interview_audit(
     interview_id: UUID,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     return await list_audits(session, tenant_id, interview_id)
 
@@ -367,7 +372,7 @@ async def get_interview(
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
     ),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
     interview = await session.scalar(
         select(Interview).where(Interview.id == interview_id, Interview.tenant_id == tenant_id)
@@ -381,7 +386,7 @@ async def get_interview(
 async def list_notifications(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     rows = await session.scalars(
         select(Notification)
@@ -395,7 +400,7 @@ async def list_notifications(
 async def list_notification_failures(
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     rows = await session.scalars(
         select(NotificationInbox)
@@ -410,7 +415,7 @@ async def replay_notification_failure(
     event_id: str,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER)),
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(tenant_session),
 ):
     inbox = await request_replay(session, tenant_id, event_id)
     if inbox is None:

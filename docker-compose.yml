@@ -45,7 +45,8 @@ services:
   api:
     build: .
     environment:
-      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
+      # The web API is deliberately not the schema owner. RLS binds this account to the JWT tenant.
+      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow_app:hireflow_app_dev_only@postgres:5432/hireflow
       HIREFLOW_JWT_SECRET: local-development-secret-change-before-production
       HIREFLOW_REDIS_URL: redis://redis:6379/0
     ports:
