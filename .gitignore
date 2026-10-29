@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+hireflow.db
+*.db-journal
+.pytest_cache/
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+coverage.xml
+htmlcov/
