@@ -178,3 +178,21 @@ class NotificationFailureRead(BaseModel):
     attempts: int
     last_error: str | None
     created_at: datetime
+
+
+class DashboardInterviewRead(BaseModel):
+    id: UUID
+    candidate_name: str
+    interviewer_name: str
+    job_title: str
+    starts_at: datetime
+    ends_at: datetime
+    status: str
+
+
+class DashboardOverviewRead(BaseModel):
+    open_jobs: int
+    candidates: int
+    upcoming_interviews: int
+    unread_notifications: int
+    upcoming: list[DashboardInterviewRead]

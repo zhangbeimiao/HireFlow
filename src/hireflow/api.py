@@ -1,13 +1,15 @@
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import Depends, FastAPI, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.staticfiles import StaticFiles
 
 from hireflow.auth import Principal, create_access_token, current_principal, require_roles
 from hireflow.availability import (
@@ -15,6 +17,7 @@ from hireflow.availability import (
     add_interviewer_availability,
     suggest_earliest_slot,
 )
+from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session
 from hireflow.models import Base, Interview, Notification, NotificationInbox
 from hireflow.notifications import request_replay
@@ -40,6 +43,7 @@ from hireflow.schemas import (
     AvailabilityRead,
     CandidateCreate,
     CandidateRead,
+    DashboardOverviewRead,
     InterviewCreate,
     InterviewRead,
     InterviewStatusUpdate,
@@ -85,6 +89,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.mount("/metrics", make_asgi_app())
+web_root = Path(__file__).parent / "web"
+app.mount("/assets", StaticFiles(directory=web_root), name="assets")
 
 
 @app.middleware("http")
@@ -123,6 +129,18 @@ def current_tenant(principal: Principal = Depends(current_principal)) -> UUID:
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+async def workbench() -> FileResponse:
+    return FileResponse(web_root / "index.html")
+
+
+@app.get("/v1/dashboard/overview", response_model=DashboardOverviewRead)
+async def get_dashboard_overview(
+    tenant_id: UUID = Depends(current_tenant), session: AsyncSession = Depends(get_session)
+) -> DashboardOverviewRead:
+    return await dashboard_overview(session, tenant_id)
 
 
 @app.post("/v1/auth/bootstrap", response_model=AccessTokenRead, status_code=status.HTTP_201_CREATED)

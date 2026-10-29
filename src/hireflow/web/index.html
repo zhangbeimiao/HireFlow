@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a1020" />
+    <title>HireFlow · 招聘运营台</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand" href="/" aria-label="HireFlow 首页"><span class="brand-mark">H</span><span>HireFlow</span></a>
+        <div class="workspace"><span class="pulse"></span><span>招聘运营中心</span><span class="chevron">⌄</span></div>
+        <nav aria-label="主导航">
+          <a class="nav-item active" href="#overview"><span>▦</span>概览</a>
+          <a class="nav-item" href="#schedule"><span>◫</span>面试排期 <b>NEW</b></a>
+          <a class="nav-item" href="#candidates"><span>♙</span>候选人</a>
+          <a class="nav-item" href="#jobs"><span>▱</span>招聘职位</a>
+          <a class="nav-item" href="#notifications"><span>◌</span>通知中心</a>
+        </nav>
+        <div class="sidebar-foot"><a href="/docs" target="_blank">⌘ 开发者 API 文档 ↗</a><span>v0.1.0 · local</span></div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div><p class="eyebrow">招聘工作台</p><h1>今天，招到对的人。</h1></div>
+          <div class="top-actions"><button class="icon-button" id="refresh" title="刷新数据">↻</button><button class="primary-button" id="open-auth">连接团队 <span>→</span></button></div>
+        </header>
+
+        <section class="hero-card" id="overview">
+          <div class="hero-copy"><span class="tag">SCHEDULING CONTROL</span><h2>将每一次面试，变成可靠的协作。</h2><p>由 PostgreSQL 保障排期一致性，由事件驱动通知闭环。登录后查看当前企业的真实招聘数据。</p><div class="hero-actions"><button class="primary-button" id="hero-auth">开始使用 <span>→</span></button><a class="text-link" href="/docs" target="_blank">查看接口能力 ↗</a></div></div>
+          <div class="orbit" aria-hidden="true"><div class="orbit-core">◎</div><span class="satellite one"></span><span class="satellite two"></span><span class="satellite three"></span></div>
+        </section>
+
+        <section class="metrics" aria-label="招聘指标">
+          <article class="metric-card"><span class="metric-icon cyan">▱</span><div><p>开放职位</p><strong id="open-jobs">—</strong><small>待团队连接</small></div></article>
+          <article class="metric-card"><span class="metric-icon violet">♙</span><div><p>候选人</p><strong id="candidates">—</strong><small>全流程累计</small></div></article>
+          <article class="metric-card"><span class="metric-icon amber">◫</span><div><p>待进行面试</p><strong id="upcoming">—</strong><small>从当前时刻起</small></div></article>
+          <article class="metric-card"><span class="metric-icon rose">◌</span><div><p>未读通知</p><strong id="notifications">—</strong><small>事件驱动投递</small></div></article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel schedule-panel" id="schedule"><div class="panel-head"><div><p class="eyebrow">UP NEXT</p><h3>即将进行的面试</h3></div><span class="live-dot">实时</span></div><div id="interview-list" class="empty-state"><span>◫</span><p>连接团队后显示近期面试</p></div></article>
+          <article class="panel reliability-panel"><div class="panel-head"><div><p class="eyebrow">SYSTEM STATUS</p><h3>可靠性护栏</h3></div><span class="status-ok">● 运行中</span></div><div class="guard"><span class="guard-number">01</span><div><strong>排期冲突保护</strong><p>PostgreSQL 排他约束作为最终裁决。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">02</span><div><strong>事件通知闭环</strong><p>Outbox、重试队列与幂等消费。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">03</span><div><strong>多租户访问控制</strong><p>JWT 签名声明与 RBAC 权限校验。</p></div><span class="guard-check">✓</span></div><a class="panel-link" href="/metrics" target="_blank">打开 Prometheus 指标 ↗</a></article>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="auth-dialog"><form method="dialog" class="auth-card"><button class="close" value="cancel" aria-label="关闭">×</button><p class="eyebrow">WELCOME TO HIREFLOW</p><h2>连接你的招聘团队</h2><div class="tabs"><button type="button" class="tab active" data-tab="login">登录已有团队</button><button type="button" class="tab" data-tab="bootstrap">创建演示团队</button></div><div id="error" role="alert"></div>
+      <div class="form-view" id="login-view"><label>企业 ID<input id="login-tenant" placeholder="UUID" required /></label><label>邮箱<input id="login-email" type="email" placeholder="name@company.com" required /></label><label>密码<input id="login-password" type="password" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="login-submit">登录并进入工作台 <span>→</span></button><p class="form-hint">企业 ID 在初始化团队时生成；也可从演示脚本输出中获取。</p></div>
+      <div class="form-view hidden" id="bootstrap-view"><label>企业名称<input id="tenant-name" placeholder="例如：Northstar Studio" required /></label><div class="field-row"><label>姓名<input id="owner-name" placeholder="招聘负责人" required /></label><label>邮箱<input id="owner-email" type="email" placeholder="owner@company.com" required /></label></div><label>设置密码<input id="owner-password" type="password" minlength="12" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="bootstrap-submit">创建并进入工作台 <span>→</span></button><p class="form-hint">仅用于本地演示。Token 只保存在当前浏览器。</p></div>
+    </form></dialog>
+    <div id="toast" role="status"></div><script src="/assets/app.js"></script>
+  </body>
+</html>

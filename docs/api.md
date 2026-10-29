@@ -8,6 +8,15 @@ Authorization: Bearer <access_token>
 
 Token 包含用户、企业和角色声明；服务端不以客户端传入的 `tenant_id` 作为授权依据。
 
+## 招聘工作台
+
+| Method | Path | 权限 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/` | 公开 | 中文招聘运营工作台；页面本身不含敏感数据。 |
+| GET | `/v1/dashboard/overview` | 已登录用户 | 返回当前租户的开放职位、候选人、待进行面试、未读通知计数及最近 5 条面试。 |
+
+工作台通过登录或初始化接口取得 JWT；Token 仅保存在浏览器本地存储，并在每次聚合查询时由 `Authorization` 请求头传递。
+
 ## 调用示例
 
 ### 初始化企业并获取 Owner Token

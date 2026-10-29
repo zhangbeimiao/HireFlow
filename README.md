@@ -15,6 +15,7 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **可靠通知**：事务内写 Outbox；Relay 用 `FOR UPDATE SKIP LOCKED` 发布事件；Inbox 按 `(consumer_name, event_id)` 幂等消费，支持重试、DLQ 和 Owner 重放。
 - **运行保护**：Redis 固定窗口限流；请求 ID、JSON 结构化访问日志和 Prometheus 指标。
+- **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队，并展示真实的岗位、候选人、待进行面试与通知指标；Swagger 保留为开发者接口文档。
 
 ## 架构
 
@@ -46,6 +47,7 @@ docker compose up --build -d
 ```
 
 - Swagger UI：`http://127.0.0.1:8000/docs`
+- 招聘工作台：`http://127.0.0.1:8000/`
 - Prometheus：`http://127.0.0.1:8000/metrics`
 - RabbitMQ 管理台：`http://127.0.0.1:15672`（开发账号 `hireflow` / `hireflow_dev_only`）
 
