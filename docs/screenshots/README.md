@@ -2,6 +2,12 @@
 
 本目录只存放脱敏后的真实运行截图。截图前请确认浏览器、终端和 Docker Desktop 中没有 Token、密码、绝对本地路径或个人邮箱。
 
+若新开的 PowerShell 窗口无法识别 `docker`，先执行：
+
+```powershell
+$env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
+```
+
 建议按以下文件名采集：
 
 | 文件名 | 操作 | 证明点 |

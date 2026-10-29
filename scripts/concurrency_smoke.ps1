@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 $baseUrl = "http://localhost:8000"
 $runId = Get-Date -Format "yyyyMMddHHmmss"
 $password = "HireFlowConcurrencyPassword!2026"
@@ -7,6 +8,25 @@ function Invoke-HireFlowJson {
     param([string] $Path, [object] $Body, [hashtable] $Headers = @{})
     Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" `
         -Headers $Headers -Body ($Body | ConvertTo-Json -Depth 5)
+}
+
+for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+        $health = Invoke-RestMethod -Uri "$baseUrl/health" -ErrorAction Stop
+        if ($health.status -eq "ok") {
+            break
+        }
+    }
+    catch {
+        if ($attempt -eq 10) {
+            throw "HireFlow API is not ready at $baseUrl. Run 'docker compose up -d' first. Details: $($_.Exception.Message)"
+        }
+        Start-Sleep -Seconds 1
+    }
+}
+
+if ($null -eq $health -or $health.status -ne "ok") {
+    throw "HireFlow API did not return a ready health response."
 }
 
 function Add-Availability {
@@ -63,7 +83,7 @@ $startInterview = {
     try {
         $response = Invoke-WebRequest -Method Post -Uri "$url/v1/interviews" `
             -ContentType "application/json" -Headers @{ Authorization = $authorization } `
-            -Body $json -ErrorAction Stop
+            -Body $json -UseBasicParsing -ErrorAction Stop
         [PSCustomObject]@{ status = [int]$response.StatusCode; body = $response.Content }
     }
     catch {

@@ -39,6 +39,8 @@ Client → FastAPI (JWT/RBAC, Redis rate limit, request ID) → PostgreSQL
 ```powershell
 cd D:\Projects\hireflow
 .\.venv\Scripts\Activate.ps1
+# Docker Desktop 已启动、但当前 PowerShell 找不到 docker 时执行一次：
+$env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 docker compose up --build -d
 .\scripts\stack_smoke.ps1
 ```
