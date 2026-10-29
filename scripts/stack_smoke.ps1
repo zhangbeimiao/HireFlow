@@ -25,8 +25,24 @@ if ($health.status -ne "ok") {
     throw "unexpected API health response"
 }
 
+$liveness = Invoke-RestMethod -Uri "http://localhost:8000/health/live" -ErrorAction Stop
+if ($liveness.status -ne "alive") {
+    throw "unexpected API liveness response"
+}
+
+$readiness = Invoke-RestMethod -Uri "http://localhost:8000/health/ready" -ErrorAction Stop
+if (
+    $readiness.status -ne "ready" -or
+    $readiness.dependencies.postgres -ne "ok" -or
+    $readiness.dependencies.redis -ne "ok"
+) {
+    throw "unexpected API readiness response"
+}
+
 [PSCustomObject]@{
     services = $expectedServices.Count
     api_health = $health.status
+    liveness = $liveness.status
+    readiness = $readiness.status
     result = "compose stack verified"
 } | Format-List

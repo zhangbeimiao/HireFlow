@@ -8,6 +8,16 @@ Authorization: Bearer <access_token>
 
 Token 包含用户、企业和角色声明；服务端不以客户端传入的 `tenant_id` 作为授权依据。
 
+## 健康检查
+
+| Method | Path | 成功语义 | 说明 |
+| --- | --- | --- | --- |
+| GET | `/health` | `200 {"status":"ok"}` | 为已有脚本保留的兼容接口。 |
+| GET | `/health/live` | `200 {"status":"alive"}` | 仅确认 API 进程可处理 HTTP，不访问外部依赖。 |
+| GET | `/health/ready` | `200 ready/degraded` 或 `503 not_ready` | 检查 PostgreSQL 与 Redis；不返回地址、凭据或异常原文。 |
+
+PostgreSQL 是同步业务的关键依赖，不可用时 readiness 返回 `503`。Redis 承担缓存与限流，项目采用 fail-open 降级策略，因此 Redis 不可用时返回 `200` 与 `status=degraded`。RabbitMQ 不在 API readiness 内：同步事务先可靠写入 PostgreSQL Outbox，Broker 故障由 Relay 的重试与积压指标反映。
+
 ## 招聘工作台
 
 | Method | Path | 权限 | 说明 |

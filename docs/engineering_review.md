@@ -15,10 +15,9 @@
 
 ## 当前有意保留的边界
 
-1. `/health` 是进程就绪探针；数据库、Redis、RabbitMQ 分别由 Compose 健康检查和业务验收脚本覆盖。生产环境可拆为 liveness/readiness，并在 readiness 中检查必要依赖。
-2. 通知仅落库模拟，没有接入第三方邮件或短信供应商；因此不承诺真实外部投递成功率。
-3. Redis 承担列表缓存与限流，但不参与排期正确性；短暂不可用时缓存读取 fail-open 回 PostgreSQL，不破坏 PostgreSQL 的一致性约束。
-4. GitHub Actions 已运行静态检查、单元测试和完整 Docker 集成验收，包括 RLS、可靠消息、并发排期与缓存性能对比。
+1. 通知仅落库模拟，没有接入第三方邮件或短信供应商；因此不承诺真实外部投递成功率。
+2. Redis 承担列表缓存与限流，但不参与排期正确性；短暂不可用时缓存读取 fail-open 回 PostgreSQL，不破坏 PostgreSQL 的一致性约束。
+3. GitHub Actions 已运行静态检查、单元测试和完整 Docker 集成验收，包括 RLS、可靠消息、并发排期与缓存性能对比。
 
 ## 下一阶段优先级
 
@@ -65,3 +64,10 @@
 - API、Outbox Relay、Notification Consumer 分别暴露 Prometheus 端点，避免把多进程指标错误聚合在单个 Python Registry 中。
 - API 记录排期冲突和数据库连接池 size/checked-in/checked-out/overflow；Relay 记录发布结果与 PostgreSQL Outbox pending/publishing/retry 积压；Consumer 记录处理、重试、DLQ、requeue 与失败/重放积压。
 - `observability_smoke.ps1` 同时抓取三个端点并断言关键指标存在；业务积压 Gauge 由持久化状态刷新，进程重启后仍可恢复。
+
+## 阶段七：健康检查分层
+
+- `/health/live` 只验证进程可响应，避免数据库或缓存短暂抖动触发容器重启；`/health/ready` 才判断是否应继续接收业务流量。
+- PostgreSQL 是同步事务关键依赖，不可用返回 `503 not_ready`；Redis 的缓存与限流允许 fail-open，因此不可用时返回 `200 degraded`。
+- RabbitMQ 由 Transactional Outbox 与同步 API 解耦，不纳入 API readiness；故障通过 Relay 重试、积压指标和独立进程状态暴露。
+- 探针仅返回规范化依赖状态，不泄露连接地址、凭据或异常文本；Compose API healthcheck 使用 readiness，验收脚本同时覆盖兼容接口、liveness 与 readiness。

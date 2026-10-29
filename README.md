@@ -48,6 +48,8 @@ docker compose up --build -d
 
 - Swagger UI：`http://127.0.0.1:8000/docs`
 - 招聘工作台：`http://127.0.0.1:8000/`
+- 存活探针：`http://127.0.0.1:8000/health/live`
+- 就绪探针：`http://127.0.0.1:8000/health/ready`
 - API Prometheus：`http://127.0.0.1:8000/metrics`
 - Outbox Relay Prometheus：`http://127.0.0.1:9101/metrics`
 - Notification Consumer Prometheus：`http://127.0.0.1:9102/metrics`
@@ -82,7 +84,7 @@ python -m pytest -q
 | --- | --- |
 | `demo.ps1` | 创建招聘流程、排期、确认状态和 4 条站内通知。 |
 | `workbench_smoke.ps1` | 验证工作台依赖的列表、可用时段推荐、dashboard 聚合与排期 `201/409`。 |
-| `stack_smoke.ps1` | 检查 Compose 关键服务处于运行态，并验证 API `/health`。 |
+| `stack_smoke.ps1` | 检查 Compose 服务、兼容健康接口、进程 liveness 与 PostgreSQL/Redis readiness。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
 | `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |
@@ -114,6 +116,7 @@ EXCLUDE USING gist (
 
 - 通知为站内信模拟，尚未接入真实邮件供应商。
 - Redis 用于列表缓存和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
+- API readiness 将 PostgreSQL 视为关键依赖；Redis 不可用时返回 `degraded` 但仍接流量，RabbitMQ 由 Outbox 解耦而不阻断同步 API。
 - 指标已暴露，尚未接入 Grafana 仪表盘与告警系统。
 
 下一轮工程化优先级见 [工程审查记录](docs/engineering_review.md)。

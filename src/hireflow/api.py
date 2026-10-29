@@ -1,3 +1,4 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -22,6 +23,7 @@ from hireflow.availability import (
 from hireflow.cache import cached_list, invalidate_cached_list
 from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session, get_tenant_session, tenant_session_scope
+from hireflow.health import postgres_ready, readiness_response, redis_ready
 from hireflow.models import Base, Interview, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
 from hireflow.observability import SCHEDULING_CONFLICTS, begin_request, finish_request
@@ -188,6 +190,20 @@ def _page_response(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/live")
+async def liveness() -> dict[str, str]:
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def readiness(request: Request) -> JSONResponse:
+    postgres_ok, redis_ok = await asyncio.gather(
+        postgres_ready(), redis_ready(request.app.state.redis)
+    )
+    status_code, payload = readiness_response(postgres_ok, redis_ok)
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 @app.get("/", include_in_schema=False)

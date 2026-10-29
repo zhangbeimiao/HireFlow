@@ -20,6 +20,13 @@ Scheduling service
 Outbox Relay ──> RabbitMQ ──> Notification Consumer ──> PostgreSQL notifications
 ```
 
+## Health boundaries
+
+- `/health/live` 只验证 API 进程存活，不因外部依赖抖动触发无效重启。
+- `/health/ready` 以 API 运行账号执行 PostgreSQL 最小查询，并探测 Redis。PostgreSQL 不可用返回 `503 not_ready`；Redis 不可用返回 `200 degraded`，列表读取仍可 fail-open 回源 PostgreSQL。
+- RabbitMQ 不属于同步 API 的就绪门禁。面试事务先写 Outbox，Broker 故障由 Relay 重试、Outbox backlog 指标及进程级健康状态暴露。
+- 探针只公开规范化状态，不返回连接串、主机、凭据或异常原文。
+
 ## Observability boundaries
 
 三个独立进程分别暴露 Prometheus 指标，避免假装不同进程共享 Python 内存：

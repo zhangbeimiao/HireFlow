@@ -29,3 +29,7 @@ Relay 可能在“已发布、未标记 published”时崩溃，因此语义是�
 ### 目前有哪些边界？
 
 通知是站内信模拟，未对接邮件供应商；Prometheus 只暴露指标，尚未配置 Grafana 告警；缓存未实现热点 Key 请求合并，限流仍使用固定窗口，生产场景可根据流量演进。
+
+### 为什么要区分 liveness 和 readiness？
+
+Liveness 只回答进程是否活着，依赖抖动时不应通过重启制造更大压力；readiness 回答实例是否适合接流量。HireFlow 将 PostgreSQL 视为关键依赖，不可用返回 503；Redis 故障可回源数据库，因此返回 degraded 但保持就绪。RabbitMQ 由 Outbox 解耦，不阻断同步 API，故障通过 Relay 重试与积压指标暴露。
