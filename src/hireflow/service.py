@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from hireflow.domain import ACTIVE_STATUSES, InterviewStatus, can_transition, overlaps
 from hireflow.models import Candidate, Interview, InterviewAudit, Job, OutboxEvent, User
 from hireflow.recruiting import InvalidReference
-from hireflow.schemas import InterviewCreate, InterviewStatusUpdate
+from hireflow.schemas import DashboardInterviewRead, InterviewCreate, InterviewStatusUpdate
 
 
 class SchedulingConflict(Exception):
@@ -158,3 +158,29 @@ async def list_audits(session: AsyncSession, tenant_id: UUID, interview_id: UUID
         .order_by(InterviewAudit.created_at)
     )
     return list(rows)
+
+
+async def list_interviews(
+    session: AsyncSession, tenant_id: UUID, limit: int = 100
+) -> list[DashboardInterviewRead]:
+    rows = await session.execute(
+        select(Interview, Candidate.full_name, User.display_name, Job.title)
+        .join(Candidate, Candidate.id == Interview.candidate_id)
+        .join(User, User.id == Interview.interviewer_id)
+        .join(Job, Job.id == Interview.job_id)
+        .where(Interview.tenant_id == tenant_id)
+        .order_by(Interview.starts_at.desc())
+        .limit(limit)
+    )
+    return [
+        DashboardInterviewRead(
+            id=interview.id,
+            candidate_name=candidate_name,
+            interviewer_name=interviewer_name,
+            job_title=job_title,
+            starts_at=interview.starts_at,
+            ends_at=interview.ends_at,
+            status=interview.status,
+        )
+        for interview, candidate_name, interviewer_name, job_title in rows
+    ]

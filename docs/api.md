@@ -89,6 +89,7 @@ Content-Type: application/json
 | POST | `/v1/interviewers/{interviewer_id}/availability` | Owner / Recruiter / Hiring Manager / Interviewer | 提交面试官时段。 |
 | POST | `/v1/scheduling/suggestions` | Owner / Recruiter / Hiring Manager | 返回共同可用时段；不预占。 |
 | POST | `/v1/interviews` | Owner / Recruiter / Hiring Manager | 创建面试；竞争冲突 `409`。 |
+| GET | `/v1/interviews` | Owner / Recruiter / Hiring Manager | 查询当前租户面试，包含候选人、职位与面试官展示信息。 |
 | POST | `/v1/interviews/{interview_id}/status` | Owner / Recruiter / Hiring Manager / Interviewer | 状态迁移，必须携带读取时的 `version`。 |
 | GET | `/v1/interviews/{interview_id}` | 相关角色 | 获取同租户面试。 |
 | GET | `/v1/interviews/{interview_id}/audit` | Owner / Recruiter / Hiring Manager | 获取审计记录。 |

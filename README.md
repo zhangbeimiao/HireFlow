@@ -59,6 +59,7 @@ python -m ruff check src tests migrations
 python -m pytest -q
 
 .\scripts\demo.ps1
+.\scripts\workbench_smoke.ps1
 .\scripts\stack_smoke.ps1
 .\scripts\security_smoke.ps1
 .\scripts\rate_limit_smoke.ps1
@@ -69,6 +70,7 @@ python -m pytest -q
 | 脚本 | 验证结果 |
 | --- | --- |
 | `demo.ps1` | 创建招聘流程、排期、确认状态和 4 条站内通知。 |
+| `workbench_smoke.ps1` | 验证工作台依赖的列表、可用时段推荐、dashboard 聚合与排期 `201/409`。 |
 | `stack_smoke.ps1` | 检查 Compose 关键服务处于运行态，并验证 API `/health`。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |

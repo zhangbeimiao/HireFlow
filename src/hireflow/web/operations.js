@@ -47,6 +47,7 @@ async function submitOperation(successMessage, path, payload) {
     await operationApi(path, { method: "POST", body: JSON.stringify(payload) });
     operationDialog.close();
     await loadOverview();
+    await loadRecords();
     operationToast(successMessage);
   } catch (error) {
     const message = error.status === 409 ? "排期冲突：该面试官在此时段已有面试。推荐时段不等于预占，PostgreSQL 已拒绝重叠写入（409 Conflict）。" : error.message;
@@ -54,7 +55,42 @@ async function submitOperation(successMessage, path, payload) {
   }
 }
 
-document.querySelectorAll(".quick-action").forEach((button) => button.addEventListener("click", () => openOperation(button.dataset.operation)));
+function renderRecords(target, items, primary, secondary) {
+  const container = document.querySelector(target);
+  if (!items.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无数据，使用上方快捷操作开始创建。</p>"; return; }
+  container.className = "record-list";
+  container.innerHTML = items.slice(0, 5).map((item) => `<div class="record-row"><span><strong>${primary(item)}</strong><small>${secondary(item)}</small></span><b>›</b></div>`).join("");
+}
+
+async function loadRecords() {
+  if (!operationToken()) return;
+  try {
+    const [jobs, candidates] = await Promise.all([operationApi("/v1/jobs"), operationApi("/v1/candidates")]);
+    renderRecords("#job-list", jobs, (job) => job.title, (job) => `状态：${job.status}`);
+    renderRecords("#candidate-list", candidates, (candidate) => candidate.full_name, (candidate) => candidate.email);
+  } catch (_) { /* authentication failures are handled by the dashboard */ }
+}
+
+document.querySelectorAll(".quick-action,.mini-action").forEach((button) => button.addEventListener("click", () => openOperation(button.dataset.operation)));
 document.querySelector("#job-submit").addEventListener("click", () => submitOperation("职位已创建", "/v1/jobs", { title: document.querySelector("#job-title").value.trim(), hiring_manager_id: document.querySelector("#job-manager").value || null }));
 document.querySelector("#candidate-submit").addEventListener("click", () => submitOperation("候选人已录入", "/v1/candidates", { full_name: document.querySelector("#candidate-name").value.trim(), email: document.querySelector("#candidate-email").value.trim(), phone: document.querySelector("#candidate-phone").value.trim() || null }));
+document.querySelector("#suggest-submit").addEventListener("click", async () => {
+  clearOperationError();
+  try {
+    const startsAt = new Date(document.querySelector("#availability-start").value).toISOString();
+    const endsAt = new Date(document.querySelector("#availability-end").value).toISOString();
+    if (startsAt === "Invalid Date" || endsAt === "Invalid Date") throw new Error("请先填写双方可用的开始与结束时间。");
+    const candidateId = document.querySelector("#schedule-candidate").value;
+    const interviewerId = document.querySelector("#schedule-interviewer").value;
+    await operationApi(`/v1/candidates/${candidateId}/availability`, { method: "POST", body: JSON.stringify({ starts_at: startsAt, ends_at: endsAt }) });
+    await operationApi(`/v1/interviewers/${interviewerId}/availability`, { method: "POST", body: JSON.stringify({ starts_at: startsAt, ends_at: endsAt }) });
+    const suggestion = await operationApi("/v1/scheduling/suggestions", { method: "POST", body: JSON.stringify({ candidate_id: candidateId, interviewer_id: interviewerId, duration_minutes: 30 }) });
+    document.querySelector("#schedule-start").value = new Date(suggestion.starts_at).toISOString().slice(0, 16);
+    document.querySelector("#schedule-end").value = new Date(suggestion.ends_at).toISOString().slice(0, 16);
+    operationToast("已计算最早共同可用时段；它尚未被预占。");
+  } catch (error) { setOperationError(error.message); }
+});
 document.querySelector("#schedule-submit").addEventListener("click", () => submitOperation("面试已安排，通知正在异步投递", "/v1/interviews", { candidate_id: document.querySelector("#schedule-candidate").value, interviewer_id: document.querySelector("#schedule-interviewer").value, job_id: document.querySelector("#schedule-job").value, starts_at: new Date(document.querySelector("#schedule-start").value).toISOString(), ends_at: new Date(document.querySelector("#schedule-end").value).toISOString(), meeting_url: document.querySelector("#schedule-url").value.trim() || null }));
+document.querySelector("#login-submit").addEventListener("click", () => window.setTimeout(loadRecords, 800));
+document.querySelector("#bootstrap-submit").addEventListener("click", () => window.setTimeout(loadRecords, 800));
+loadRecords();

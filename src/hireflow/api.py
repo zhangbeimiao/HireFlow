@@ -46,6 +46,7 @@ from hireflow.schemas import (
     AvailabilityRead,
     CandidateCreate,
     CandidateRead,
+    DashboardInterviewRead,
     DashboardOverviewRead,
     InterviewCreate,
     InterviewRead,
@@ -68,6 +69,7 @@ from hireflow.service import (
     StaleVersion,
     create_interview,
     list_audits,
+    list_interviews,
     transition_interview,
 )
 
@@ -317,6 +319,15 @@ async def schedule_interview(
         return await create_interview(session, tenant_id, payload)
     except (SchedulingConflict, InvalidReference) as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/interviews", response_model=list[DashboardInterviewRead])
+async def get_interviews(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(get_session),
+) -> list[DashboardInterviewRead]:
+    return await list_interviews(session, tenant_id)
 
 
 @app.post("/v1/interviews/{interview_id}/status", response_model=InterviewRead)

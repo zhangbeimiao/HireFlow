@@ -58,3 +58,22 @@ def test_scheduler_removes_booked_interval_before_matching() -> None:
         Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00")),
         Availability(at("2026-11-01T11:00:00+08:00"), at("2026-11-01T12:00:00+08:00")),
     ]
+
+
+def test_scheduler_returns_none_when_availability_does_not_intersect() -> None:
+    assert earliest_common_slot(
+        [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
+        [Availability(at("2026-11-01T10:00:00+08:00"), at("2026-11-01T11:00:00+08:00"))],
+        timedelta(minutes=30),
+    ) is None
+
+
+def test_scheduler_does_not_offer_a_slot_fully_consumed_by_busy_time() -> None:
+    assert subtract_busy_slots(
+        [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
+        [Availability(at("2026-11-01T08:30:00+08:00"), at("2026-11-01T10:30:00+08:00"))],
+    ) == []
+
+
+def test_cancellation_is_allowed_from_scheduled_state() -> None:
+    assert can_transition(InterviewStatus.SCHEDULED, InterviewStatus.CANCELLED)
