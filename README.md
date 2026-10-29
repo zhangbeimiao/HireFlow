@@ -1,5 +1,7 @@
 # HireFlow｜多租户招聘面试调度与协同平台
 
+[![CI](https://github.com/zhangbeimiao/HireFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangbeimiao/HireFlow/actions/workflows/ci.yml)
+
 HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时间、并发抢占同一面试时段等高风险问题。项目将排期一致性、权限隔离和异步通知拆为可验证的后端闭环。
 
 ## 技术栈
