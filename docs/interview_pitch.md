@@ -6,7 +6,7 @@ HireFlow 是我独立实现的多租户招聘面试调度后端。它解决的�
 
 我使用 FastAPI 和 PostgreSQL 实现主业务，时间统一以 UTC 保存、用半开区间计算重叠；应用层先做冲突预检以返回友好的错误，但最终通过 PostgreSQL 的 GiST 排他约束保证多实例并发下只有一个事务提交。并发脚本实际验证了两个请求抢唯一时段时得到一个 201 和一个 409。
 
-通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Relay 再投递 RabbitMQ。消费者用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志和 Prometheus 指标，并以 Docker Compose 一键运行。
+通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Relay 再投递 RabbitMQ。消费者用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志，并分别暴露 API、Relay、Consumer 的 Prometheus 指标，以 Docker Compose 一键运行。
 
 ## 重点追问
 

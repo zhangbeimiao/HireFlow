@@ -59,3 +59,9 @@
 - 职位、候选人、面试和通知列表使用“排序时间 + ID”的 Keyset 游标，默认 20、最大 100；保持数组响应兼容工作台，并以 `X-Next-Cursor` 暴露下一页边界。
 - 默认首页进入 Cache Aside；游标页和非默认页大小走 PostgreSQL，控制缓存 Key 数量与写后失效复杂度。
 - Alembic 为四类列表增加租户与排序字段复合索引。验收脚本以每类 5000 条事务内数据运行 `EXPLAIN (ANALYZE, BUFFERS)`，真实 SQLAlchemy 查询形状均命中目标索引，随后回滚样本并刷新基表统计信息。
+
+## 阶段六：跨进程可观测性
+
+- API、Outbox Relay、Notification Consumer 分别暴露 Prometheus 端点，避免把多进程指标错误聚合在单个 Python Registry 中。
+- API 记录排期冲突和数据库连接池 size/checked-in/checked-out/overflow；Relay 记录发布结果与 PostgreSQL Outbox pending/publishing/retry 积压；Consumer 记录处理、重试、DLQ、requeue 与失败/重放积压。
+- `observability_smoke.ps1` 同时抓取三个端点并断言关键指标存在；业务积压 Gauge 由持久化状态刷新，进程重启后仍可恢复。

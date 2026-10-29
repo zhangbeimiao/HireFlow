@@ -5,10 +5,17 @@ import json
 import os
 
 import aio_pika
+from prometheus_client import start_http_server
 
 from hireflow.broker import EVENT_QUEUE, declare_event_topology
 from hireflow.db import SessionLocal
-from hireflow.outbox import claim_pending_events, mark_published, record_publish_failure
+from hireflow.observability import OUTBOX_RELAY_EVENTS
+from hireflow.outbox import (
+    claim_pending_events,
+    mark_published,
+    record_publish_failure,
+    refresh_outbox_metrics,
+)
 
 
 async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
@@ -36,15 +43,20 @@ async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
                 routing_key=EVENT_QUEUE,
             )
         except (aio_pika.exceptions.AMQPException, ConnectionError):
+            OUTBOX_RELAY_EVENTS.labels(outcome="retry").inc()
             async with SessionLocal() as session:
                 await record_publish_failure(session, event.id)
         else:
+            OUTBOX_RELAY_EVENTS.labels(outcome="published").inc()
             async with SessionLocal() as session:
                 await mark_published(session, event.id)
+    async with SessionLocal() as session:
+        await refresh_outbox_metrics(session)
     return len(events)
 
 
 async def run() -> None:
+    start_http_server(int(os.getenv("HIREFLOW_METRICS_PORT", "9101")))
     rabbitmq_url = os.getenv(
         "HIREFLOW_RABBITMQ_URL", "amqp://hireflow:hireflow_dev_only@localhost/"
     )

@@ -41,6 +41,35 @@ CACHE_INVALIDATIONS = Counter(
     "Cache invalidation attempts by resource and outcome.",
     ["resource", "outcome"],
 )
+SCHEDULING_CONFLICTS = Counter(
+    "hireflow_scheduling_conflicts_total",
+    "Interview scheduling requests rejected because an active slot already overlaps.",
+)
+OUTBOX_RELAY_EVENTS = Counter(
+    "hireflow_outbox_relay_events_total",
+    "Outbox relay publish attempts by outcome.",
+    ["outcome"],
+)
+OUTBOX_BACKLOG = Gauge(
+    "hireflow_outbox_backlog",
+    "Persisted Outbox events awaiting or currently undergoing publication.",
+    ["state"],
+)
+NOTIFICATION_DELIVERIES = Counter(
+    "hireflow_notification_deliveries_total",
+    "Notification consumer deliveries by durable outcome.",
+    ["outcome"],
+)
+NOTIFICATION_FAILURE_BACKLOG = Gauge(
+    "hireflow_notification_failure_backlog",
+    "Notification Inbox records requiring failure or replay handling.",
+    ["state"],
+)
+DB_POOL_CONNECTIONS = Gauge(
+    "hireflow_db_pool_connections",
+    "SQLAlchemy connection pool state in the current process.",
+    ["state"],
+)
 
 
 class JsonFormatter(logging.Formatter):

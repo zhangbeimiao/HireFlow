@@ -24,7 +24,7 @@ from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session, get_tenant_session, tenant_session_scope
 from hireflow.models import Base, Interview, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
-from hireflow.observability import begin_request, finish_request
+from hireflow.observability import SCHEDULING_CONFLICTS, begin_request, finish_request
 from hireflow.pagination import (
     DEFAULT_PAGE_SIZE,
     MAX_PAGE_SIZE,
@@ -472,6 +472,8 @@ async def schedule_interview(
     try:
         return await create_interview(session, tenant_id, payload)
     except (SchedulingConflict, InvalidReference) as error:
+        if isinstance(error, SchedulingConflict):
+            SCHEDULING_CONFLICTS.inc()
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 

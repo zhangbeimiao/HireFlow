@@ -20,6 +20,16 @@ Scheduling service
 Outbox Relay ──> RabbitMQ ──> Notification Consumer ──> PostgreSQL notifications
 ```
 
+## Observability boundaries
+
+三个独立进程分别暴露 Prometheus 指标，避免假装不同进程共享 Python 内存：
+
+- API `:8000/metrics`：HTTP 吞吐/延迟、在途请求、缓存、排期冲突和 SQLAlchemy 连接池状态。
+- Outbox Relay `:9101/metrics`：发布成功/重试 Counter，以及 pending、publishing、retry 持久化积压 Gauge。
+- Notification Consumer `:9102/metrics`：processed、retry、DLQ、requeue 结果，以及 failed/replay 状态积压。
+
+Outbox 与通知积压指标直接根据 PostgreSQL 持久化状态刷新；进程重启不会让失败证据消失。当前阶段只暴露采集端点，告警阈值需要结合生产流量基线后配置。
+
 ## Scheduling invariants
 
 1. Timestamps include an offset at the API boundary and are stored as `timestamptz` in PostgreSQL.

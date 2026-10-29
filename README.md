@@ -48,7 +48,9 @@ docker compose up --build -d
 
 - Swagger UI：`http://127.0.0.1:8000/docs`
 - 招聘工作台：`http://127.0.0.1:8000/`
-- Prometheus：`http://127.0.0.1:8000/metrics`
+- API Prometheus：`http://127.0.0.1:8000/metrics`
+- Outbox Relay Prometheus：`http://127.0.0.1:9101/metrics`
+- Notification Consumer Prometheus：`http://127.0.0.1:9102/metrics`
 - RabbitMQ 管理台：`http://127.0.0.1:15672`（开发账号 `hireflow` / `hireflow_dev_only`）
 
 ## 开发与验收
@@ -83,7 +85,7 @@ python -m pytest -q
 | `stack_smoke.ps1` | 检查 Compose 关键服务处于运行态，并验证 API `/health`。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
-| `observability_smoke.ps1` | `X-Request-ID` 回传，Prometheus HTTP 指标暴露。 |
+| `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |
 | `concurrency_smoke.ps1` | 两位候选人并发抢唯一时段：恰好一个 `201`、一个 `409`。 |
 | `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
 | `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |

@@ -5,6 +5,7 @@ import json
 import os
 
 import aio_pika
+from prometheus_client import start_http_server
 
 from hireflow.broker import DLQ, EVENT_QUEUE, RETRY_QUEUE, declare_event_topology
 from hireflow.db import SessionLocal
@@ -12,8 +13,10 @@ from hireflow.notifications import (
     claim_replay_requests,
     consume_notification_event,
     record_consumer_failure,
+    refresh_notification_metrics,
     reset_replay_request,
 )
+from hireflow.observability import NOTIFICATION_DELIVERIES
 
 MAX_DELIVERIES = 3
 
@@ -57,6 +60,7 @@ async def handle_message(message: aio_pika.abc.AbstractIncomingMessage, channel:
                     routing_key=DLQ,
                 )
                 await message.ack()
+                NOTIFICATION_DELIVERIES.labels(outcome="malformed_dlq").inc()
                 return
             async with SessionLocal() as session:
                 await record_consumer_failure(session, event, error)
@@ -64,10 +68,14 @@ async def handle_message(message: aio_pika.abc.AbstractIncomingMessage, channel:
             destination = RETRY_QUEUE if retries + 1 < MAX_DELIVERIES else DLQ
             await publish_event(channel, event, destination, retries + 1)
             await message.ack()
+            outcome = "retry" if destination == RETRY_QUEUE else "dlq"
+            NOTIFICATION_DELIVERIES.labels(outcome=outcome).inc()
         except Exception:  # noqa: BLE001 - preserve the original message when retry publishing fails.
             await message.nack(requeue=True)
+            NOTIFICATION_DELIVERIES.labels(outcome="requeued").inc()
     else:
         await message.ack()
+        NOTIFICATION_DELIVERIES.labels(outcome="processed").inc()
 
 
 async def publish_requested_replays(channel: aio_pika.abc.AbstractChannel) -> None:
@@ -82,6 +90,7 @@ async def publish_requested_replays(channel: aio_pika.abc.AbstractChannel) -> No
 
 
 async def run() -> None:
+    start_http_server(int(os.getenv("HIREFLOW_METRICS_PORT", "9102")))
     rabbitmq_url = os.getenv(
         "HIREFLOW_RABBITMQ_URL", "amqp://hireflow:hireflow_dev_only@localhost/"
     )
@@ -93,6 +102,8 @@ async def run() -> None:
         await queue.consume(lambda message: handle_message(message, channel))
         while True:
             await publish_requested_replays(channel)
+            async with SessionLocal() as session:
+                await refresh_notification_metrics(session)
             await asyncio.sleep(1)
 
 

@@ -17,6 +17,8 @@ for ($attempt = 1; $attempt -le 10; $attempt++) {
     }
 }
 $metrics = Invoke-WebRequest -Uri "http://localhost:8000/metrics" -UseBasicParsing
+$relayMetrics = Invoke-WebRequest -Uri "http://localhost:9101/metrics" -UseBasicParsing
+$consumerMetrics = Invoke-WebRequest -Uri "http://localhost:9102/metrics" -UseBasicParsing
 
 if ($health.Headers["X-Request-ID"] -ne $requestId) {
     throw "request ID was not returned by the API"
@@ -24,10 +26,19 @@ if ($health.Headers["X-Request-ID"] -ne $requestId) {
 if ($metrics.Content -notmatch "hireflow_http_requests_total") {
     throw "Prometheus HTTP counter was not exposed"
 }
+foreach ($metric in @("hireflow_scheduling_conflicts_total", "hireflow_db_pool_connections")) {
+    if ($metrics.Content -notmatch $metric) { throw "API metric was not exposed: $metric" }
+}
+foreach ($metric in @("hireflow_outbox_relay_events_total", "hireflow_outbox_backlog")) {
+    if ($relayMetrics.Content -notmatch $metric) { throw "Relay metric was not exposed: $metric" }
+}
+foreach ($metric in @("hireflow_notification_deliveries_total", "hireflow_notification_failure_backlog")) {
+    if ($consumerMetrics.Content -notmatch $metric) { throw "Consumer metric was not exposed: $metric" }
+}
 
 [PSCustomObject]@{
     request_id = $health.Headers["X-Request-ID"]
     health_status = $health.StatusCode
-    metrics = "hireflow_http_requests_total exposed"
+    metrics = "API, DB pool, scheduling, Outbox and notification metrics exposed"
     result = "observability verified"
 } | Format-List

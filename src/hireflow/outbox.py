@@ -3,10 +3,11 @@
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.models import OutboxEvent
+from hireflow.observability import OUTBOX_BACKLOG
 
 
 def retry_after(attempts: int) -> timedelta:
@@ -55,3 +56,21 @@ async def record_publish_failure(session: AsyncSession, event_id: UUID) -> None:
     event.next_attempt_at = datetime.now(UTC) + retry_after(event.attempts)
     event.lease_expires_at = None
     await session.commit()
+
+
+async def refresh_outbox_metrics(session: AsyncSession) -> None:
+    counts = {
+        "pending": await session.scalar(
+            select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status == "pending")
+        ),
+        "publishing": await session.scalar(
+            select(func.count()).select_from(OutboxEvent).where(OutboxEvent.status == "publishing")
+        ),
+        "retry": await session.scalar(
+            select(func.count())
+            .select_from(OutboxEvent)
+            .where(OutboxEvent.status == "pending", OutboxEvent.attempts > 0)
+        ),
+    }
+    for state, count in counts.items():
+        OUTBOX_BACKLOG.labels(state=state).set(count or 0)

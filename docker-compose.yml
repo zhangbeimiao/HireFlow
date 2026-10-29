@@ -69,6 +69,9 @@ services:
     environment:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_METRICS_PORT: 9101
+    ports:
+      - "9101:9101"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -80,6 +83,9 @@ services:
     environment:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_METRICS_PORT: 9102
+    ports:
+      - "9102:9102"
     depends_on:
       migrate:
         condition: service_completed_successfully

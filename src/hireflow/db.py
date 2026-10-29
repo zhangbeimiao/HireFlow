@@ -5,12 +5,20 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from hireflow.observability import DB_POOL_CONNECTIONS
+
 DATABASE_URL = os.getenv(
     "HIREFLOW_DATABASE_URL",
     "postgresql+asyncpg://hireflow:hireflow_dev_only@localhost:5432/hireflow",
 )
 engine = create_async_engine(DATABASE_URL, future=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+
+_pool = engine.sync_engine.pool
+DB_POOL_CONNECTIONS.labels(state="size").set_function(_pool.size)
+DB_POOL_CONNECTIONS.labels(state="checked_in").set_function(_pool.checkedin)
+DB_POOL_CONNECTIONS.labels(state="checked_out").set_function(_pool.checkedout)
+DB_POOL_CONNECTIONS.labels(state="overflow").set_function(_pool.overflow)
 
 
 async def _clear_tenant_context(session: AsyncSession) -> None:

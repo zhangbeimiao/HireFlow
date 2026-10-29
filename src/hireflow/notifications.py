@@ -3,10 +3,11 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.models import Interview, Notification, NotificationInbox
+from hireflow.observability import NOTIFICATION_FAILURE_BACKLOG
 
 CONSUMER_NAME = "notification-consumer"
 
@@ -164,3 +165,13 @@ async def reset_replay_request(session: AsyncSession, inbox_id: UUID) -> None:
     if inbox is not None and inbox.status == "replay_queued":
         inbox.status = "replay_requested"
         await session.commit()
+
+
+async def refresh_notification_metrics(session: AsyncSession) -> None:
+    for state in ("failed", "replay_requested", "replay_queued"):
+        count = await session.scalar(
+            select(func.count())
+            .select_from(NotificationInbox)
+            .where(NotificationInbox.consumer_name == CONSUMER_NAME, NotificationInbox.status == state)
+        )
+        NOTIFICATION_FAILURE_BACKLOG.labels(state=state).set(count or 0)
