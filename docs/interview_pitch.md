@@ -6,13 +6,17 @@ HireFlow 是我独立实现的多租户招聘面试调度后端。它解决的�
 
 我使用 FastAPI 和 PostgreSQL 实现主业务，时间统一以 UTC 保存、用半开区间计算重叠；应用层先做冲突预检以返回友好的错误，但最终通过 PostgreSQL 的 GiST 排他约束保证多实例并发下只有一个事务提交。并发脚本实际验证了两个请求抢唯一时段时得到一个 201 和一个 409。
 
-通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Relay 再投递 RabbitMQ。消费者用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、多租户隔离、Redis 限流、请求 ID、结构化日志和 Prometheus 指标，并以 Docker Compose 一键运行。
+通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Relay 再投递 RabbitMQ。消费者用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志和 Prometheus 指标，并以 Docker Compose 一键运行。
 
 ## 重点追问
 
 ### 为什么不用 Redis 锁保证排期？
 
-Redis 锁可减少冲突，但 Redis 不是排期事实来源，也无法替代数据库最终约束。HireFlow 的 PostgreSQL 排他约束直接约束写入数据；Redis 当前只用于可用性保护的限流。
+Redis 锁可减少冲突，但 Redis 不是排期事实来源，也无法替代数据库最终约束。HireFlow 的 PostgreSQL 排他约束直接约束写入数据；Redis 只用于列表缓存和可用性保护的限流，故障时缓存读取回源数据库。
+
+### 为什么缓存命中时不能仍然创建数据库会话？
+
+如果 FastAPI 在进入缓存判断前就初始化 RLS 会话，即使命中 Redis 也会产生数据库连接和 `set_config` 往返，缓存收益会被抵消。HireFlow 将租户数据库会话延迟到 MISS loader 内部；本机 Locust 对比中，热缓存吞吐约提升 42%，同时 P95/P99 均下降。
 
 ### 推荐时段为什么仍可能创建失败？
 
@@ -24,4 +28,4 @@ Relay 可能在“已发布、未标记 published”时崩溃，因此语义是�
 
 ### 目前有哪些边界？
 
-通知是站内信模拟，未对接邮件供应商；Prometheus 只暴露指标，尚未配置 Grafana 告警；Redis 限流使用固定窗口，生产场景可根据业务演进为滑动窗口或令牌桶。
+通知是站内信模拟，未对接邮件供应商；Prometheus 只暴露指标，尚未配置 Grafana 告警；缓存未实现热点 Key 请求合并，限流仍使用固定窗口，生产场景可根据流量演进。

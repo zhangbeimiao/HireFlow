@@ -11,19 +11,20 @@
 | 数据提交成功但消息未发送 | 业务事务内写 Outbox，Relay 异步投递 | 消除双写窗口，允许至少一次投递。 |
 | 消息重复消费 | Inbox 和 Notification 的唯一键幂等 | Relay 重投不会重复创建站内信。 |
 | 突发请求压垮认证与写接口 | Redis 固定窗口限流 | 限流脚本验证第 11 次失败登录返回 `429`。 |
+| 重复列表查询增加数据库负载 | 租户级 Redis Cache Aside，提交后失效、TTL 兜底 | 单测覆盖隔离/失效/降级，Locust 对比数据库回源与热缓存。 |
 
 ## 当前有意保留的边界
 
 1. `/health` 是进程就绪探针；数据库、Redis、RabbitMQ 分别由 Compose 健康检查和业务验收脚本覆盖。生产环境可拆为 liveness/readiness，并在 readiness 中检查必要依赖。
 2. 通知仅落库模拟，没有接入第三方邮件或短信供应商；因此不承诺真实外部投递成功率。
-3. Redis 仅做限流，不参与排期正确性；其短暂不可用不应破坏 PostgreSQL 的一致性约束。
-4. CI 当前运行静态检查与单元测试；Docker 全链路验证依赖本地脚本，后续可在 GitHub Actions 增加 service containers 或 Compose job。
+3. Redis 承担列表缓存与限流，但不参与排期正确性；短暂不可用时缓存读取 fail-open 回 PostgreSQL，不破坏 PostgreSQL 的一致性约束。
+4. GitHub Actions 已运行静态检查、单元测试和完整 Docker 集成验收，包括 RLS、可靠消息、并发排期与缓存性能对比。
 
 ## 下一阶段优先级
 
-1. **CI 集成验证**：在 GitHub Actions 启动 PostgreSQL、Redis、RabbitMQ，自动运行安全与并发验收。
-2. **生产化配置**：用密钥管理替代 Compose 明文开发密码；配置 CORS、HTTPS 终止与日志采集。
-3. **指标与告警**：制作 Grafana 面板，围绕排期冲突率、Outbox 延迟、DLQ 堆积和限流命中率设置告警。
+1. **生产化配置**：用密钥管理替代 Compose 明文开发密码；配置 CORS、HTTPS 终止与日志采集。
+2. **指标与告警**：制作 Grafana 面板，围绕缓存命中率、排期冲突率、Outbox 延迟、DLQ 堆积和限流命中率设置告警。
+3. **缓存防击穿**：当真实流量证明热点 Key 重建竞争明显时，再引入短租约或请求合并，而不是提前增加分布式锁复杂度。
 4. **通知通道**：接入邮件供应商，并把供应商回执与重放审计纳入通知状态机。
 # HireFlow 工程化推进记录
 
@@ -45,3 +46,10 @@
 - `scripts/reliability_smoke.ps1` 在 Worker 容器内对真实 PostgreSQL 执行验收：同一事件重复消费只生成候选人和面试官各一条通知；这覆盖“提交成功后、ack 之前消费者宕机”导致的至少一次重投。
 - 对毒消息保留 `notification_inbox` 中的失败证据，并验证 `failed → replay_requested → replay_queued → replay_requested` 的人工重放状态机；实际 Consumer 仍负责将失败消息按 5 秒重试队列转发至 DLQ。
 - 对 Relay 故障验证 `publishing → pending(next_attempt_at)`，重试时间由指数退避持久化在 Outbox，而非仅存在进程内存。
+
+## 阶段四：Redis 缓存与性能治理
+
+- 职位与候选人列表采用 Cache Aside；Key 由版本、`tenant_id`、资源类型组成，避免跨租户串数据。创建与更新在数据库提交成功后删除当前租户 Key，TTL 默认 60 秒作为最终收敛边界。
+- 热缓存命中路径不建立 PostgreSQL 会话；MISS、显式 `Cache-Control: no-cache` 或 Redis 故障才执行 RLS 约束下的数据库查询。Redis 读取异常 fail-open，业务正确性仍由 PostgreSQL 保证。
+- Prometheus 记录 hit/miss/error/bypass、进程内命中率、数据库回源耗时和失效结果。单元测试覆盖 MISS→HIT、TTL、失效、跨租户 Key 与 Redis 故障降级。
+- 一次本机 Locust 快照（10 用户、每类 20 条数据、每阶段 5 秒）中，数据库回源约 `208 RPS / P95 44ms / P99 100ms`，热缓存约 `295 RPS / P95 28ms / P99 48ms`。数据用于同环境回归，不外推为生产容量。

@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
@@ -103,6 +104,21 @@ class JobCreate(BaseModel):
     hiring_manager_id: UUID | None = None
 
 
+class JobUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    hiring_manager_id: UUID | None = None
+    status: Literal["open", "paused", "closed"] | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "JobUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one job field must be provided")
+        for field in ("title", "status"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
 class JobRead(JobCreate):
     id: UUID
     tenant_id: UUID
@@ -113,6 +129,21 @@ class CandidateCreate(BaseModel):
     email: EmailStr
     full_name: str = Field(min_length=1, max_length=120)
     phone: str | None = Field(default=None, max_length=30)
+
+
+class CandidateUpdate(BaseModel):
+    email: EmailStr | None = None
+    full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    phone: str | None = Field(default=None, max_length=30)
+
+    @model_validator(mode="after")
+    def require_change(self) -> "CandidateUpdate":
+        if not self.model_fields_set:
+            raise ValueError("at least one candidate field must be provided")
+        for field in ("email", "full_name"):
+            if field in self.model_fields_set and getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class CandidateRead(CandidateCreate):

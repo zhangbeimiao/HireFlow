@@ -80,6 +80,14 @@ jobs:
         shell: pwsh
         run: ./scripts/load_test.ps1 -Users 10 -SpawnRate 10 -RunSeconds 5
 
+      - name: Verify Redis Cache Aside behavior
+        shell: pwsh
+        run: ./scripts/cache_smoke.ps1
+
+      - name: Compare PostgreSQL and warmed-cache list performance
+        shell: pwsh
+        run: ./scripts/cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 5 -ItemsPerList 10
+
       - name: Verify Redis rate limiting and observability
         shell: pwsh
         run: |

@@ -49,6 +49,7 @@ services:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow_app:hireflow_app_dev_only@postgres:5432/hireflow
       HIREFLOW_JWT_SECRET: local-development-secret-change-before-production
       HIREFLOW_REDIS_URL: redis://redis:6379/0
+      HIREFLOW_LIST_CACHE_TTL_SECONDS: 60
     ports:
       - "8000:8000"
     healthcheck:

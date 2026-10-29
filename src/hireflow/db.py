@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from uuid import UUID
 
 from sqlalchemy import text
@@ -39,6 +40,14 @@ async def set_tenant_context(session: AsyncSession, tenant_id: UUID) -> None:
 
 async def get_tenant_session(tenant_id: UUID):
     """Yield an API session whose database connection is constrained by RLS."""
+    async with tenant_session_scope(tenant_id) as session:
+        yield session
+
+
+@asynccontextmanager
+async def tenant_session_scope(tenant_id: UUID):
+    """Open an RLS-scoped session only when a cache miss actually needs PostgreSQL."""
+
     async with SessionLocal() as session:
         await set_tenant_context(session, tenant_id)
         try:

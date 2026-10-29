@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
@@ -17,9 +17,10 @@ from hireflow.availability import (
     add_interviewer_availability,
     suggest_earliest_slot,
 )
+from hireflow.cache import cached_list, invalidate_cached_list
 from hireflow.dashboard import dashboard_overview
-from hireflow.db import engine, get_session, get_tenant_session
-from hireflow.models import Base, Candidate, Interview, Job, Notification, NotificationInbox, User
+from hireflow.db import engine, get_session, get_tenant_session, tenant_session_scope
+from hireflow.models import Base, Interview, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
 from hireflow.observability import begin_request, finish_request
 from hireflow.rate_limit import enforce_rate_limit
@@ -36,6 +37,8 @@ from hireflow.recruiting import (
     list_candidates,
     list_jobs,
     list_users,
+    update_candidate,
+    update_job,
 )
 from hireflow.schemas import (
     AccessTokenRead,
@@ -46,6 +49,7 @@ from hireflow.schemas import (
     AvailabilityRead,
     CandidateCreate,
     CandidateRead,
+    CandidateUpdate,
     DashboardInterviewRead,
     DashboardOverviewRead,
     InterviewCreate,
@@ -53,6 +57,7 @@ from hireflow.schemas import (
     InterviewStatusUpdate,
     JobCreate,
     JobRead,
+    JobUpdate,
     LoginRequest,
     NotificationFailureRead,
     NotificationRead,
@@ -81,6 +86,9 @@ async def lifespan(_: FastAPI):
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
     app.state.redis = Redis.from_url(os.getenv("HIREFLOW_REDIS_URL", "redis://localhost:6379/0"))
+    app.state.cache_ttl_seconds = int(os.getenv("HIREFLOW_LIST_CACHE_TTL_SECONDS", "60"))
+    if app.state.cache_ttl_seconds < 1:
+        raise RuntimeError("HIREFLOW_LIST_CACHE_TTL_SECONDS must be at least 1")
     try:
         yield
     finally:
@@ -199,34 +207,78 @@ async def get_users(
 @app.post("/v1/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)
 async def register_job(
     payload: JobCreate,
+    request: Request,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
-        return await create_job(session, tenant_id, payload)
+        job = await create_job(session, tenant_id, payload)
+        await invalidate_cached_list(request.app.state.redis, resource="jobs", tenant_id=tenant_id)
+        return job
     except (TenantNotFound, InvalidReference) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.get("/v1/jobs", response_model=list[JobRead])
 async def get_jobs(
+    request: Request,
+    response: Response,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+) -> list[JobRead]:
+    async def load_jobs():
+        async with tenant_session_scope(tenant_id) as session:
+            rows = await list_jobs(session, tenant_id)
+            return [
+                JobRead.model_validate(row, from_attributes=True).model_dump(mode="json")
+                for row in rows
+            ]
+
+    result = await cached_list(
+        request.app.state.redis,
+        resource="jobs",
+        tenant_id=tenant_id,
+        schema=JobRead,
+        loader=load_jobs,
+        ttl_seconds=request.app.state.cache_ttl_seconds,
+        bypass="no-cache" in request.headers.get("Cache-Control", "").lower(),
+    )
+    response.headers["X-Cache"] = result.outcome
+    return result.items
+
+
+@app.patch("/v1/jobs/{job_id}", response_model=JobRead)
+async def revise_job(
+    job_id: UUID,
+    payload: JobUpdate,
+    request: Request,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
     session: AsyncSession = Depends(tenant_session),
-) -> list[Job]:
-    return await list_jobs(session, tenant_id)
+):
+    try:
+        job = await update_job(session, tenant_id, job_id, payload)
+        await invalidate_cached_list(request.app.state.redis, resource="jobs", tenant_id=tenant_id)
+        return job
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
 
 
 @app.post("/v1/candidates", response_model=CandidateRead, status_code=status.HTTP_201_CREATED)
 async def register_candidate(
     payload: CandidateCreate,
+    request: Request,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
-        return await create_candidate(session, tenant_id, payload)
+        candidate = await create_candidate(session, tenant_id, payload)
+        await invalidate_cached_list(
+            request.app.state.redis, resource="candidates", tenant_id=tenant_id
+        )
+        return candidate
     except TenantNotFound as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DuplicateResource as error:
@@ -235,11 +287,51 @@ async def register_candidate(
 
 @app.get("/v1/candidates", response_model=list[CandidateRead])
 async def get_candidates(
+    request: Request,
+    response: Response,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+) -> list[CandidateRead]:
+    async def load_candidates():
+        async with tenant_session_scope(tenant_id) as session:
+            rows = await list_candidates(session, tenant_id)
+            return [
+                CandidateRead.model_validate(row, from_attributes=True).model_dump(mode="json")
+                for row in rows
+            ]
+
+    result = await cached_list(
+        request.app.state.redis,
+        resource="candidates",
+        tenant_id=tenant_id,
+        schema=CandidateRead,
+        loader=load_candidates,
+        ttl_seconds=request.app.state.cache_ttl_seconds,
+        bypass="no-cache" in request.headers.get("Cache-Control", "").lower(),
+    )
+    response.headers["X-Cache"] = result.outcome
+    return result.items
+
+
+@app.patch("/v1/candidates/{candidate_id}", response_model=CandidateRead)
+async def revise_candidate(
+    candidate_id: UUID,
+    payload: CandidateUpdate,
+    request: Request,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
     session: AsyncSession = Depends(tenant_session),
-) -> list[Candidate]:
-    return await list_candidates(session, tenant_id)
+):
+    try:
+        candidate = await update_candidate(session, tenant_id, candidate_id, payload)
+        await invalidate_cached_list(
+            request.app.state.redis, resource="candidates", tenant_id=tenant_id
+        )
+        return candidate
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except DuplicateResource as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @app.post("/v1/applications", response_model=ApplicationRead, status_code=status.HTTP_201_CREATED)

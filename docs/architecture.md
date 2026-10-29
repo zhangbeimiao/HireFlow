@@ -77,6 +77,8 @@ durably claims those requests and republishes the original payload.
 | Question | Expected answer direction |
 | --- | --- |
 | Why not only lock Redis when creating an interview? | Redis is not the system of record; the PostgreSQL exclusion constraint survives process restarts and protects every application instance. |
+| How is cache isolation enforced? | Every list key includes the JWT tenant id; PostgreSQL RLS still constrains every miss, and writes invalidate only that tenant's key. |
+| What happens when Redis is unavailable? | List reads fail open to PostgreSQL and cache invalidation relies on TTL convergence; scheduling correctness never depends on Redis. |
 | Why can a suggested slot still fail to create? | It is a read-time recommendation; a competing request may reserve the slot before submission. The final write must return 409 and allow a retry. |
 | How do you avoid duplicate notifications? | Publish with outbox event ID; consumers persist handled IDs and perform idempotent side effects. |
 | What happens if the relay dies after publishing? | The DB state may still be `publishing`; after its lease expires it is republished. This is why consumers deduplicate. |

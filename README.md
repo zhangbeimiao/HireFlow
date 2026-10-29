@@ -14,13 +14,13 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **可靠通知**：事务内写 Outbox；Relay 用 `FOR UPDATE SKIP LOCKED` 发布事件；Inbox 按 `(consumer_name, event_id)` 幂等消费，支持重试、DLQ 和 Owner 重放。
-- **运行保护**：Redis 固定窗口限流；请求 ID、JSON 结构化访问日志和 Prometheus 指标；Locust 压测保留吞吐、P95/P99 与唯一时段竞争结果。
+- **缓存与运行保护**：职位、候选人列表采用租户级 Redis Cache Aside，写后失效并设置 TTL；Redis 同时承担固定窗口限流，请求 ID、结构化日志和 Prometheus 指标覆盖运行状态。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、新建职位、录入候选人和安排面试；排期冲突在页面直观呈现为 `409 Conflict`，Swagger 保留为开发者接口文档。
 
 ## 架构
 
 ```text
-Client → FastAPI (JWT/RBAC, Redis rate limit, request ID) → PostgreSQL
+Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
                     │                                  ├─ interviews + audit + outbox
                     │                                  └─ notification inbox + in-app notifications
                     ▼
@@ -67,8 +67,11 @@ python -m pytest -q
 .\scripts\concurrency_smoke.ps1
 .\scripts\reliability_smoke.ps1
 .\scripts\rls_smoke.ps1
+.\scripts\cache_smoke.ps1
 # 需要先执行 python -m pip install -e ".[dev]"，默认 20 个并发用户
 .\scripts\load_test.ps1 -Users 20 -SpawnRate 10
+# 对比强制 PostgreSQL 回源与 Redis 热缓存的 RPS、P95、P99
+.\scripts\cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 10
 ```
 
 | 脚本 | 验证结果 |
@@ -83,6 +86,10 @@ python -m pytest -q
 | `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
 | `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |
 | `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
+| `cache_smoke.ps1` | 验证职位/候选人列表 MISS→HIT、创建/更新后失效、租户级 Key、TTL 与缓存指标。 |
+| `cache_performance.ps1` | Locust 对比 `Cache-Control: no-cache` 数据库回源与热缓存，输出 RPS、P95、P99。 |
+
+一次本机快照（10 用户、每类 20 条数据、每阶段 5 秒）中，热缓存相对数据库回源的吞吐由约 `208 RPS` 提升到 `295 RPS`，P95 从 `44ms` 降至 `28ms`，P99 从 `100ms` 降至 `48ms`。该数据仅用于同机型回归对比，不代表生产容量。
 
 ## 关键一致性约束
 
@@ -98,7 +105,7 @@ EXCLUDE USING gist (
 ## 当前边界
 
 - 通知为站内信模拟，尚未接入真实邮件供应商。
-- Redis 当前用于限流，不承担排期正确性。
+- Redis 用于列表缓存和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
 - 指标已暴露，尚未接入 Grafana 仪表盘与告警系统。
 
 下一轮工程化优先级见 [工程审查记录](docs/engineering_review.md)。

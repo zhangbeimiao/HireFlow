@@ -12,7 +12,9 @@ from hireflow.models import Application, Candidate, Job, Tenant, User
 from hireflow.schemas import (
     ApplicationCreate,
     CandidateCreate,
+    CandidateUpdate,
     JobCreate,
+    JobUpdate,
     LoginRequest,
     TenantBootstrap,
     TenantCreate,
@@ -116,6 +118,26 @@ async def list_jobs(session: AsyncSession, tenant_id: UUID) -> list[Job]:
     return list(rows)
 
 
+async def update_job(
+    session: AsyncSession, tenant_id: UUID, job_id: UUID, payload: JobUpdate
+) -> Job:
+    job = await session.scalar(select(Job).where(Job.id == job_id, Job.tenant_id == tenant_id))
+    if job is None:
+        raise InvalidReference("job not found")
+    values = payload.model_dump(exclude_unset=True)
+    manager_id = values.get("hiring_manager_id")
+    if manager_id is not None:
+        manager = await session.scalar(
+            select(User).where(User.id == manager_id, User.tenant_id == tenant_id)
+        )
+        if manager is None:
+            raise InvalidReference("hiring_manager_id does not belong to this tenant")
+    for field, value in values.items():
+        setattr(job, field, value)
+    await _commit(session)
+    return job
+
+
 async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: CandidateCreate) -> Candidate:
     await require_tenant(session, tenant_id)
     candidate = Candidate(tenant_id=tenant_id, **payload.model_dump())
@@ -129,6 +151,20 @@ async def list_candidates(session: AsyncSession, tenant_id: UUID) -> list[Candid
         select(Candidate).where(Candidate.tenant_id == tenant_id).order_by(Candidate.created_at.desc())
     )
     return list(rows)
+
+
+async def update_candidate(
+    session: AsyncSession, tenant_id: UUID, candidate_id: UUID, payload: CandidateUpdate
+) -> Candidate:
+    candidate = await session.scalar(
+        select(Candidate).where(Candidate.id == candidate_id, Candidate.tenant_id == tenant_id)
+    )
+    if candidate is None:
+        raise InvalidReference("candidate not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(candidate, field, value)
+    await _commit(session)
+    return candidate
 
 
 async def create_application(

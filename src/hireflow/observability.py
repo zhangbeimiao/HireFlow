@@ -21,6 +21,26 @@ HTTP_DURATION = Histogram(
     ["method", "route"],
 )
 HTTP_IN_FLIGHT = Gauge("hireflow_http_requests_in_flight", "Requests currently in flight.")
+CACHE_REQUESTS = Counter(
+    "hireflow_cache_requests_total",
+    "Cache Aside list lookups by resource and outcome.",
+    ["resource", "outcome"],
+)
+CACHE_HIT_RATIO = Gauge(
+    "hireflow_cache_hit_ratio",
+    "Process-local cache hit ratio since startup.",
+    ["resource"],
+)
+CACHE_DB_LOAD_DURATION = Histogram(
+    "hireflow_cache_db_load_duration_seconds",
+    "PostgreSQL fallback latency after a cache miss or bypass.",
+    ["resource"],
+)
+CACHE_INVALIDATIONS = Counter(
+    "hireflow_cache_invalidations_total",
+    "Cache invalidation attempts by resource and outcome.",
+    ["resource", "outcome"],
+)
 
 
 class JsonFormatter(logging.Formatter):
