@@ -1,11 +1,12 @@
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 $requestId = [guid]::NewGuid().ToString()
 $health = $null
 for ($attempt = 1; $attempt -le 10; $attempt++) {
     try {
         $health = Invoke-WebRequest -Uri "http://localhost:8000/health" `
-            -Headers @{ "X-Request-ID" = $requestId } -ErrorAction Stop
+            -Headers @{ "X-Request-ID" = $requestId } -UseBasicParsing -ErrorAction Stop
         break
     }
     catch {
@@ -15,7 +16,7 @@ for ($attempt = 1; $attempt -le 10; $attempt++) {
         Start-Sleep -Seconds 1
     }
 }
-$metrics = Invoke-WebRequest -Uri "http://localhost:8000/metrics"
+$metrics = Invoke-WebRequest -Uri "http://localhost:8000/metrics" -UseBasicParsing
 
 if ($health.Headers["X-Request-ID"] -ne $requestId) {
     throw "request ID was not returned by the API"

@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 $baseUrl = "http://localhost:8000"
 $attempts = 11
@@ -13,7 +14,7 @@ for ($i = 1; $i -le $attempts; $i++) {
     # Login failures deliberately still count, preventing credential-stuffing probes.
     try {
         $response = Invoke-WebRequest -Method Post -Uri "$baseUrl/v1/auth/tokens" `
-            -ContentType "application/json" -Body $body -ErrorAction Stop
+            -ContentType "application/json" -Body $body -UseBasicParsing -ErrorAction Stop
         $statuses += [int]$response.StatusCode
     }
     catch {
