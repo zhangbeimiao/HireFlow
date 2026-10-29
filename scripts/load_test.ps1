@@ -13,6 +13,7 @@ $slot = @{ starts_at = "2026-12-20T10:00:00+08:00"; ends_at = "2026-12-20T10:30:
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $python = Join-Path $projectRoot ".venv\Scripts\python.exe"
 if (-not (Test-Path $python)) { $python = "python" }
+$locustfile = Join-Path $projectRoot "load/locustfile.py"
 
 function Invoke-HireFlowJson {
     param([string] $Path, [object] $Body, [hashtable] $Headers = @{})
@@ -48,7 +49,7 @@ $env:HIREFLOW_LOAD_CANDIDATE_IDS = $candidateIds | ConvertTo-Json -Compress
 $env:HIREFLOW_LOAD_STARTS_AT = $slot.starts_at
 $env:HIREFLOW_LOAD_ENDS_AT = $slot.ends_at
 
-& $python -m locust -f "$projectRoot\load\locustfile.py" --headless --host $baseUrl `
+& $python -m locust -f $locustfile --headless --host $baseUrl `
     -u $Users -r $SpawnRate --run-time "$($RunSeconds)s" --only-summary
 if ($LASTEXITCODE -ne 0) { throw "Locust failed with exit code $LASTEXITCODE" }
 
