@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0a1020" />
     <title>HireFlow · 招聘运营台</title>
     <link rel="stylesheet" href="/assets/app.css" />
+    <link rel="stylesheet" href="/assets/operations.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -33,6 +34,12 @@
           <div class="orbit" aria-hidden="true"><div class="orbit-core">◎</div><span class="satellite one"></span><span class="satellite two"></span><span class="satellite three"></span></div>
         </section>
 
+        <section class="quick-actions" aria-label="快捷操作">
+          <button class="quick-action" data-operation="job"><span class="quick-icon cyan">＋</span><span><strong>新建职位</strong><small>添加开放岗位与招聘负责人</small></span><b>→</b></button>
+          <button class="quick-action" data-operation="candidate"><span class="quick-icon violet">♙</span><span><strong>录入候选人</strong><small>建立候选人档案，进入招聘流程</small></span><b>→</b></button>
+          <button class="quick-action" data-operation="schedule"><span class="quick-icon amber">◫</span><span><strong>安排面试</strong><small>选择人员与时段，提交一致性校验</small></span><b>→</b></button>
+        </section>
+
         <section class="metrics" aria-label="招聘指标">
           <article class="metric-card"><span class="metric-icon cyan">▱</span><div><p>开放职位</p><strong id="open-jobs">—</strong><small>待团队连接</small></div></article>
           <article class="metric-card"><span class="metric-icon violet">♙</span><div><p>候选人</p><strong id="candidates">—</strong><small>全流程累计</small></div></article>
@@ -51,6 +58,11 @@
       <div class="form-view" id="login-view"><label>企业 ID<input id="login-tenant" placeholder="UUID" required /></label><label>邮箱<input id="login-email" type="email" placeholder="name@company.com" required /></label><label>密码<input id="login-password" type="password" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="login-submit">登录并进入工作台 <span>→</span></button><p class="form-hint">企业 ID 在初始化团队时生成；也可从演示脚本输出中获取。</p></div>
       <div class="form-view hidden" id="bootstrap-view"><label>企业名称<input id="tenant-name" placeholder="例如：Northstar Studio" required /></label><div class="field-row"><label>姓名<input id="owner-name" placeholder="招聘负责人" required /></label><label>邮箱<input id="owner-email" type="email" placeholder="owner@company.com" required /></label></div><label>设置密码<input id="owner-password" type="password" minlength="12" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="bootstrap-submit">创建并进入工作台 <span>→</span></button><p class="form-hint">仅用于本地演示。Token 只保存在当前浏览器。</p></div>
     </form></dialog>
-    <div id="toast" role="status"></div><script src="/assets/app.js"></script>
+    <dialog id="operation-dialog"><form method="dialog" class="operation-card"><button class="close" value="cancel" aria-label="关闭">×</button><p class="eyebrow" id="operation-kicker">QUICK ACTION</p><h2 id="operation-title">新建职位</h2><div id="operation-error" role="alert"></div>
+      <div class="operation-view" id="job-view"><label>职位名称<input id="job-title" placeholder="例如：后端开发工程师" /></label><label>招聘负责人（可选）<select id="job-manager"><option value="">暂不指定</option></select></label><button class="primary-button wide" type="button" id="job-submit">创建职位 <span>→</span></button></div>
+      <div class="operation-view hidden" id="candidate-view"><div class="field-row"><label>姓名<input id="candidate-name" placeholder="候选人姓名" /></label><label>邮箱<input id="candidate-email" type="email" placeholder="candidate@email.com" /></label></div><label>手机号（可选）<input id="candidate-phone" placeholder="13800000000" /></label><button class="primary-button wide" type="button" id="candidate-submit">保存候选人 <span>→</span></button></div>
+      <div class="operation-view hidden" id="schedule-view"><label>候选人<select id="schedule-candidate"></select></label><label>面试官<select id="schedule-interviewer"></select></label><label>关联职位<select id="schedule-job"></select></label><div class="field-row"><label>开始时间<input id="schedule-start" type="datetime-local" /></label><label>结束时间<input id="schedule-end" type="datetime-local" /></label></div><label>会议链接（可选）<input id="schedule-url" placeholder="https://meeting.example.com/..." /></label><div class="conflict-note">排期提交时由 PostgreSQL 排他约束进行最终冲突裁决；若同一面试官存在重叠时段，将返回 <code>409 Conflict</code>。</div><button class="primary-button wide" type="button" id="schedule-submit">确认安排面试 <span>→</span></button></div>
+    </form></dialog>
+    <div id="toast" role="status"></div><script src="/assets/app.js"></script><script src="/assets/operations.js"></script>
   </body>
 </html>

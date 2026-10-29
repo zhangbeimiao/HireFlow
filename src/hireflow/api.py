@@ -19,7 +19,7 @@ from hireflow.availability import (
 )
 from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session
-from hireflow.models import Base, Interview, Notification, NotificationInbox
+from hireflow.models import Base, Candidate, Interview, Job, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
 from hireflow.observability import begin_request, finish_request
 from hireflow.rate_limit import enforce_rate_limit
@@ -33,6 +33,9 @@ from hireflow.recruiting import (
     create_candidate,
     create_job,
     create_user,
+    list_candidates,
+    list_jobs,
+    list_users,
 )
 from hireflow.schemas import (
     AccessTokenRead,
@@ -177,6 +180,15 @@ async def register_user(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.get("/v1/users", response_model=list[UserRead])
+async def get_users(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(get_session),
+) -> list[User]:
+    return await list_users(session, tenant_id)
+
+
 @app.post("/v1/jobs", response_model=JobRead, status_code=status.HTTP_201_CREATED)
 async def register_job(
     payload: JobCreate,
@@ -188,6 +200,15 @@ async def register_job(
         return await create_job(session, tenant_id, payload)
     except (TenantNotFound, InvalidReference) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.get("/v1/jobs", response_model=list[JobRead])
+async def get_jobs(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(get_session),
+) -> list[Job]:
+    return await list_jobs(session, tenant_id)
 
 
 @app.post("/v1/candidates", response_model=CandidateRead, status_code=status.HTTP_201_CREATED)
@@ -203,6 +224,15 @@ async def register_candidate(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DuplicateResource as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/candidates", response_model=list[CandidateRead])
+async def get_candidates(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(get_session),
+) -> list[Candidate]:
+    return await list_candidates(session, tenant_id)
 
 
 @app.post("/v1/applications", response_model=ApplicationRead, status_code=status.HTTP_201_CREATED)

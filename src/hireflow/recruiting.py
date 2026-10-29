@@ -85,6 +85,13 @@ async def create_user(session: AsyncSession, tenant_id: UUID, payload: UserCreat
     return user
 
 
+async def list_users(session: AsyncSession, tenant_id: UUID) -> list[User]:
+    rows = await session.scalars(
+        select(User).where(User.tenant_id == tenant_id).order_by(User.created_at, User.display_name)
+    )
+    return list(rows)
+
+
 async def create_job(session: AsyncSession, tenant_id: UUID, payload: JobCreate) -> Job:
     await require_tenant(session, tenant_id)
     if payload.hiring_manager_id is not None:
@@ -100,6 +107,13 @@ async def create_job(session: AsyncSession, tenant_id: UUID, payload: JobCreate)
     return job
 
 
+async def list_jobs(session: AsyncSession, tenant_id: UUID) -> list[Job]:
+    rows = await session.scalars(
+        select(Job).where(Job.tenant_id == tenant_id).order_by(Job.created_at.desc())
+    )
+    return list(rows)
+
+
 async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: CandidateCreate) -> Candidate:
     await require_tenant(session, tenant_id)
     candidate = Candidate(tenant_id=tenant_id, **payload.model_dump())
@@ -107,6 +121,13 @@ async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: Cand
     await _commit(session)
     await session.refresh(candidate)
     return candidate
+
+
+async def list_candidates(session: AsyncSession, tenant_id: UUID) -> list[Candidate]:
+    rows = await session.scalars(
+        select(Candidate).where(Candidate.tenant_id == tenant_id).order_by(Candidate.created_at.desc())
+    )
+    return list(rows)
 
 
 async def create_application(

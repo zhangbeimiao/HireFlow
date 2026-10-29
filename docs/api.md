@@ -74,8 +74,11 @@ Content-Type: application/json
 | POST | `/v1/auth/bootstrap` | 公开 | 创建企业与首个 Owner，返回 JWT。 |
 | POST | `/v1/auth/tokens` | 公开 | 企业 ID、邮箱、密码登录；失败统一 `401`。 |
 | POST | `/v1/users` | Owner | 创建 Recruiter、Hiring Manager 或 Interviewer。 |
+| GET | `/v1/users` | Owner / Recruiter / Hiring Manager | 查询当前租户成员，供排期选择面试官。 |
 | POST | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 创建职位。 |
+| GET | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 查询当前租户职位。 |
 | POST | `/v1/candidates` | Owner / Recruiter | 创建候选人。 |
+| GET | `/v1/candidates` | Owner / Recruiter / Hiring Manager | 查询当前租户候选人。 |
 | POST | `/v1/applications` | Owner / Recruiter | 候选人与职位关联。 |
 
 ## 可用时段与排期
