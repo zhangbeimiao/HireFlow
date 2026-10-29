@@ -31,3 +31,44 @@ jobs:
 
       - name: Unit tests
         run: python -m pytest -q
+
+  integration:
+    name: Docker integration checks
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Start full application stack
+        run: docker compose up --build -d --wait --wait-timeout 90
+
+      - name: Verify Compose service readiness
+        shell: pwsh
+        run: ./scripts/stack_smoke.ps1
+
+      - name: Verify workbench workflow and database conflict authority
+        shell: pwsh
+        run: ./scripts/workbench_smoke.ps1
+
+      - name: Verify authentication, RBAC, and tenant isolation
+        shell: pwsh
+        run: ./scripts/security_smoke.ps1
+
+      - name: Verify concurrent scheduling conflict
+        shell: pwsh
+        run: ./scripts/concurrency_smoke.ps1
+
+      - name: Verify Redis rate limiting and observability
+        shell: pwsh
+        run: |
+          ./scripts/rate_limit_smoke.ps1
+          ./scripts/observability_smoke.ps1
+
+      - name: Print service logs after a failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Stop ephemeral services
+        if: always()
+        run: docker compose down -v
