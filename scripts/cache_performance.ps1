@@ -15,6 +15,26 @@ $python = Join-Path $projectRoot ".venv/Scripts/python.exe"
 if (-not (Test-Path $python)) { $python = "python" }
 $locustfile = Join-Path $projectRoot "load/cache_locustfile.py"
 
+# The full integration workflow intentionally exercises authentication before
+# this benchmark. Isolate this fixture from the fixed-window auth counter while
+# preserving every business-cache key and the production rate-limit settings.
+$docker = "docker"
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    $candidateDocker = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+    if (-not (Test-Path $candidateDocker)) { throw "Docker CLI was not found" }
+    $docker = $candidateDocker
+}
+$bootstrapRateLimitKeys = @(
+    & $docker compose exec -T redis redis-cli --scan --pattern "hireflow:rate-limit:POST:/v1/auth/bootstrap:*"
+)
+if ($LASTEXITCODE -ne 0) { throw "Could not enumerate bootstrap rate-limit keys" }
+foreach ($key in $bootstrapRateLimitKeys) {
+    if (-not [string]::IsNullOrWhiteSpace($key)) {
+        & $docker compose exec -T redis redis-cli DEL $key | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not delete bootstrap rate-limit fixture key" }
+    }
+}
+
 function Invoke-HireFlowJson {
     param([string] $Path, [object] $Body, [hashtable] $Headers = @{})
     Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" `
