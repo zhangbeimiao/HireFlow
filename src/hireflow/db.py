@@ -7,10 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from hireflow.observability import DB_POOL_CONNECTIONS
 
-DATABASE_URL = os.getenv(
-    "HIREFLOW_DATABASE_URL",
-    "postgresql+asyncpg://hireflow:hireflow_dev_only@localhost:5432/hireflow",
-)
+DATABASE_URL = os.getenv("HIREFLOW_DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("HIREFLOW_DATABASE_URL must be configured")
 engine = create_async_engine(DATABASE_URL, future=True)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 

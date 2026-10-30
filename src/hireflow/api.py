@@ -12,6 +12,7 @@ from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
 from sqlalchemy import select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 
 from hireflow.auth import Principal, create_access_token, current_principal, require_roles
@@ -113,9 +114,33 @@ app = FastAPI(
     description="Multi-tenant interview scheduling and collaboration platform",
     lifespan=lifespan,
 )
+allowed_hosts = [
+    host.strip()
+    for host in os.getenv("HIREFLOW_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
+    if host.strip()
+]
+if not allowed_hosts:
+    raise RuntimeError("HIREFLOW_ALLOWED_HOSTS must contain at least one host")
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts)
 app.mount("/metrics", make_asgi_app())
 web_root = Path(__file__).parent / "web"
 app.mount("/assets", StaticFiles(directory=web_root), name="assets")
+
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' https://cdn.jsdelivr.net; "
+        "style-src 'self' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "object-src 'none'; frame-ancestors 'none'; base-uri 'self'"
+    )
+    return response
 
 
 @app.middleware("http")

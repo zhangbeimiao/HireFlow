@@ -64,9 +64,9 @@ async def run() -> None:
     batch_size = int(os.getenv("HIREFLOW_OUTBOX_BATCH_SIZE", "100"))
     if batch_size < 1:
         raise ValueError("HIREFLOW_OUTBOX_BATCH_SIZE must be positive")
-    rabbitmq_url = os.getenv(
-        "HIREFLOW_RABBITMQ_URL", "amqp://hireflow:hireflow_dev_only@localhost/"
-    )
+    rabbitmq_url = os.getenv("HIREFLOW_RABBITMQ_URL")
+    if not rabbitmq_url:
+        raise RuntimeError("HIREFLOW_RABBITMQ_URL must be configured")
     connection = await aio_pika.connect_robust(rabbitmq_url)
     async with connection:
         channel = await connection.channel()

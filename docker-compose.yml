@@ -4,9 +4,9 @@ services:
     environment:
       POSTGRES_DB: hireflow
       POSTGRES_USER: hireflow
-      POSTGRES_PASSWORD: hireflow_dev_only
+      POSTGRES_PASSWORD: ${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hireflow -d hireflow"]
       interval: 5s
@@ -16,10 +16,10 @@ services:
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: hireflow
-      RABBITMQ_DEFAULT_PASS: hireflow_dev_only
+      RABBITMQ_DEFAULT_PASS: ${HIREFLOW_RABBITMQ_PASSWORD:?set HIREFLOW_RABBITMQ_PASSWORD in .env}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:5672:5672"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
@@ -28,7 +28,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -38,7 +38,8 @@ services:
     build: .
     command: alembic upgrade head
     environment:
-      HIREFLOW_MIGRATION_DATABASE_URL: postgresql+psycopg://hireflow:hireflow_dev_only@postgres:5432/hireflow
+      HIREFLOW_MIGRATION_DATABASE_URL: "postgresql+psycopg://hireflow:${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_APP_DATABASE_PASSWORD: ${HIREFLOW_APP_DATABASE_PASSWORD:?set HIREFLOW_APP_DATABASE_PASSWORD in .env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,12 +47,13 @@ services:
     build: .
     environment:
       # The web API is deliberately not the schema owner. RLS binds this account to the JWT tenant.
-      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow_app:hireflow_app_dev_only@postgres:5432/hireflow
-      HIREFLOW_JWT_SECRET: local-development-secret-change-before-production
+      HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow_app:${HIREFLOW_APP_DATABASE_PASSWORD:?set HIREFLOW_APP_DATABASE_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_JWT_SECRET: ${HIREFLOW_JWT_SECRET:?set HIREFLOW_JWT_SECRET in .env}
+      HIREFLOW_ALLOWED_HOSTS: ${HIREFLOW_ALLOWED_HOSTS:-localhost,127.0.0.1}
       HIREFLOW_REDIS_URL: redis://redis:6379/0
       HIREFLOW_LIST_CACHE_TTL_SECONDS: 60
     ports:
-      - "8000:8000"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready')"]
       interval: 5s
@@ -67,15 +69,15 @@ services:
     build:
       context: ./services/outbox-relay-go
     environment:
-      HIREFLOW_DATABASE_URL: postgresql://hireflow:hireflow_dev_only@postgres:5432/hireflow
-      HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_DATABASE_URL: "postgresql://hireflow:${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_RABBITMQ_URL: "amqp://hireflow:${HIREFLOW_RABBITMQ_PASSWORD:?set HIREFLOW_RABBITMQ_PASSWORD in .env}@rabbitmq/"
       HIREFLOW_HTTP_ADDRESS: :9101
       HIREFLOW_OUTBOX_BATCH_SIZE: 100
       HIREFLOW_OUTBOX_POLL_INTERVAL: 1s
       HIREFLOW_OUTBOX_LEASE_DURATION: 60s
       HIREFLOW_PUBLISH_TIMEOUT: 5s
     ports:
-      - "9101:9101"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:9101:9101"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9101/ready"]
       interval: 5s
@@ -92,11 +94,11 @@ services:
     build: .
     command: python -m hireflow.worker
     environment:
-      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
-      HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow:${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_RABBITMQ_URL: "amqp://hireflow:${HIREFLOW_RABBITMQ_PASSWORD:?set HIREFLOW_RABBITMQ_PASSWORD in .env}@rabbitmq/"
       HIREFLOW_METRICS_PORT: 9103
     ports:
-      - "9103:9103"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:9103:9103"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -107,11 +109,11 @@ services:
     command: python -m hireflow.consumer
     restart: on-failure
     environment:
-      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
-      HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow:${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_RABBITMQ_URL: "amqp://hireflow:${HIREFLOW_RABBITMQ_PASSWORD:?set HIREFLOW_RABBITMQ_PASSWORD in .env}@rabbitmq/"
       HIREFLOW_METRICS_PORT: 9102
     ports:
-      - "9102:9102"
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:9102:9102"
     depends_on:
       migrate:
         condition: service_completed_successfully

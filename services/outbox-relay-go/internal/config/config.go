@@ -19,13 +19,19 @@ type Config struct {
 
 func Load() (Config, error) {
 	cfg := Config{
-		DatabaseURL:    env("HIREFLOW_DATABASE_URL", "postgresql://hireflow:hireflow_dev_only@localhost:5432/hireflow"),
-		RabbitMQURL:    env("HIREFLOW_RABBITMQ_URL", "amqp://hireflow:hireflow_dev_only@localhost/"),
+		DatabaseURL:    os.Getenv("HIREFLOW_DATABASE_URL"),
+		RabbitMQURL:    os.Getenv("HIREFLOW_RABBITMQ_URL"),
 		HTTPAddress:    env("HIREFLOW_HTTP_ADDRESS", ":9101"),
 		BatchSize:      100,
 		PollInterval:   time.Second,
 		LeaseDuration:  time.Minute,
 		PublishTimeout: 5 * time.Second,
+	}
+	if cfg.DatabaseURL == "" {
+		return Config{}, fmt.Errorf("HIREFLOW_DATABASE_URL must be configured")
+	}
+	if cfg.RabbitMQURL == "" {
+		return Config{}, fmt.Errorf("HIREFLOW_RABBITMQ_URL must be configured")
 	}
 
 	var err error

@@ -48,6 +48,15 @@ function New-TenantOwnerToken {
 $ownerAHeaders = New-TenantOwnerToken "$runId-a"
 $ownerBHeaders = New-TenantOwnerToken "$runId-b"
 
+$securityResponse = Invoke-WebRequest -Uri "$baseUrl/health/live" -UseBasicParsing `
+    -Headers @{ Origin = "https://untrusted.example" }
+foreach ($header in @("X-Content-Type-Options", "X-Frame-Options", "Content-Security-Policy", "Referrer-Policy")) {
+    if (-not $securityResponse.Headers[$header]) { throw "missing security header: $header" }
+}
+if ($securityResponse.Headers["Access-Control-Allow-Origin"]) {
+    throw "untrusted cross-origin request was allowed"
+}
+
 Assert-HttpStatus { Invoke-RestMethod -Uri "$baseUrl/v1/interviews/$([guid]::NewGuid())" } 401 "unauthenticated request"
 
 $interviewer = Invoke-HireFlowJson "/v1/users" @{
@@ -119,4 +128,5 @@ Assert-HttpStatus {
     interviewer_job_creation = "403 verified"
     recruiter_candidate_and_schedule = "verified"
     cross_tenant_lookup = "404 verified"
+    browser_security = "security headers and default-deny CORS verified"
 } | Format-List

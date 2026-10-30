@@ -8,6 +8,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$env:HIREFLOW_BENCHMARK_PASSWORD = if ($env:HIREFLOW_BENCHMARK_PASSWORD) { $env:HIREFLOW_BENCHMARK_PASSWORD } else { [guid]::NewGuid().ToString("N") }
+$env:HIREFLOW_BENCHMARK_APP_PASSWORD = if ($env:HIREFLOW_BENCHMARK_APP_PASSWORD) { $env:HIREFLOW_BENCHMARK_APP_PASSWORD } else { [guid]::NewGuid().ToString("N") }
 $docker = "docker"
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     $candidate = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"

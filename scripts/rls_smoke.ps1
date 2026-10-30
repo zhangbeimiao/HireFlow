@@ -33,8 +33,8 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 
 function Invoke-RlsSql {
     param([string] $Sql)
-    $result = & $docker compose exec -T -e "PGPASSWORD=hireflow_app_dev_only" postgres `
-        psql -U hireflow_app -d hireflow -At -c $Sql
+    $scopedSql = "SET ROLE hireflow_app; $Sql"
+    $result = & $docker compose exec -T postgres psql -U hireflow -d hireflow -At -c $scopedSql
     if ($LASTEXITCODE -ne 0) { throw "RLS SQL failed: $Sql" }
     return @($result | Where-Object { $_ -ne "" })
 }

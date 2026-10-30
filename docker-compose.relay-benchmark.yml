@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: hireflow
       POSTGRES_USER: hireflow
-      POSTGRES_PASSWORD: benchmark_only
+      POSTGRES_PASSWORD: ${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U hireflow -d hireflow"]
       interval: 2s
@@ -14,7 +14,7 @@ services:
     image: rabbitmq:3.13-management-alpine
     environment:
       RABBITMQ_DEFAULT_USER: hireflow
-      RABBITMQ_DEFAULT_PASS: benchmark_only
+      RABBITMQ_DEFAULT_PASS: ${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 2s
@@ -24,7 +24,8 @@ services:
     build: .
     command: alembic upgrade head
     environment:
-      HIREFLOW_MIGRATION_DATABASE_URL: postgresql+psycopg://hireflow:benchmark_only@postgres:5432/hireflow
+      HIREFLOW_MIGRATION_DATABASE_URL: "postgresql+psycopg://hireflow:${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}@postgres:5432/hireflow"
+      HIREFLOW_APP_DATABASE_PASSWORD: ${HIREFLOW_BENCHMARK_APP_PASSWORD:?set HIREFLOW_BENCHMARK_APP_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,8 +34,8 @@ services:
     build:
       context: ./services/outbox-relay-go
     environment:
-      HIREFLOW_DATABASE_URL: postgresql://hireflow:benchmark_only@postgres:5432/hireflow
-      HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
+      HIREFLOW_DATABASE_URL: "postgresql://hireflow:${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}@postgres:5432/hireflow"
+      HIREFLOW_RABBITMQ_URL: "amqp://hireflow:${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}@rabbitmq/"
       HIREFLOW_HTTP_ADDRESS: :9101
       HIREFLOW_OUTBOX_BATCH_SIZE: ${HIREFLOW_BENCHMARK_BATCH_SIZE:-100}
       HIREFLOW_OUTBOX_POLL_INTERVAL: 1s
@@ -50,8 +51,8 @@ services:
     build: .
     command: python -m hireflow.worker
     environment:
-      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:benchmark_only@postgres:5432/hireflow
-      HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
+      HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow:${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}@postgres:5432/hireflow"
+      HIREFLOW_RABBITMQ_URL: "amqp://hireflow:${HIREFLOW_BENCHMARK_PASSWORD:?set HIREFLOW_BENCHMARK_PASSWORD}@rabbitmq/"
       HIREFLOW_METRICS_PORT: 9101
       HIREFLOW_OUTBOX_BATCH_SIZE: ${HIREFLOW_BENCHMARK_BATCH_SIZE:-100}
     ports:

@@ -9,6 +9,15 @@ on:
 permissions:
   contents: read
 
+env:
+  HIREFLOW_POSTGRES_PASSWORD: hireflow_ci_only
+  HIREFLOW_APP_DATABASE_PASSWORD: hireflow_app_ci_only
+  HIREFLOW_RABBITMQ_PASSWORD: hireflow_ci_only
+  HIREFLOW_JWT_SECRET: hireflow-ci-jwt-secret-with-at-least-32-bytes
+  HIREFLOW_GRAFANA_ADMIN_PASSWORD: hireflow_grafana_ci_only
+  HIREFLOW_BIND_ADDRESS: 127.0.0.1
+  HIREFLOW_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+
 jobs:
   quality:
     name: Lint and unit tests
@@ -35,7 +44,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23.x"
+          go-version: "1.27.x"
           cache-dependency-path: services/outbox-relay-go/go.sum
 
       - name: Vet and test Go Outbox Relay
@@ -44,10 +53,66 @@ jobs:
           go vet ./...
           go test -race ./...
 
+  security:
+    name: Dependency, secret, and image security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Audit Python dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools
+          python -m pip install -e . pip-audit
+          python -m pip_audit --vulnerability-service osv
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.27.x"
+          cache-dependency-path: services/outbox-relay-go/go.sum
+
+      - name: Audit Go dependencies and reachable code
+        working-directory: services/outbox-relay-go
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Scan Git history for committed secrets
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
+            git --source /repo --redact --no-banner --exit-code 1
+
+      - name: Scan source and dependency manifests
+        run: |
+          docker run --rm -v "$PWD:/repo" aquasec/trivy:0.76.1 \
+            fs --scanners vuln,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 /repo
+
+      - name: Build application images for scanning
+        run: |
+          docker build -t hireflow-api:security .
+          docker build -t hireflow-relay:security services/outbox-relay-go
+
+      - name: Scan application images
+        run: |
+          for image in hireflow-api:security hireflow-relay:security; do
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              aquasec/trivy:0.76.1 image --severity HIGH,CRITICAL --ignore-unfixed \
+              --exit-code 1 "$image"
+          done
+
   integration:
     name: Docker integration checks
     runs-on: ubuntu-latest
-    needs: quality
+    needs: [quality, security]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -76,7 +141,7 @@ jobs:
       - name: Set up Go integration runner
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23.x"
+          go-version: "1.27.x"
           cache-dependency-path: services/outbox-relay-go/go.sum
 
       - name: Verify Go Relay broker failures, leases, and concurrent claims
@@ -92,6 +157,13 @@ jobs:
       - name: Verify Compose service readiness
         shell: pwsh
         run: ./scripts/stack_smoke.ps1
+
+      - name: Verify application containers are non-root
+        run: |
+          for service in api notification-consumer outbox-relay; do
+            uid="$(docker compose exec -T "$service" id -u)"
+            test "$uid" != "0" || { echo "$service runs as root"; exit 1; }
+          done
 
       - name: Verify workbench workflow and database conflict authority
         shell: pwsh

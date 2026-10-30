@@ -6,7 +6,7 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 
 ## 技术栈
 
-`Python 3.11+` · `Go 1.23` · `FastAPI` · `pgx` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `Docker Compose` · `pytest` · `Go test` · `Locust` · `Prometheus`
+`Python 3.11+` · `Go 1.27` · `FastAPI` · `pgx` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `Docker Compose` · `pytest` · `Go test` · `Locust` · `Prometheus`
 
 ## 已实现能力
 
@@ -41,6 +41,8 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
 ```powershell
 cd D:\Projects\hireflow
 .\.venv\Scripts\Activate.ps1
+Copy-Item .env.example .env
+# 编辑 .env，将所有 replace-with-* 值替换为本机随机值后再启动。
 # Docker Desktop 已启动、但当前 PowerShell 找不到 docker 时执行一次：
 $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 docker compose up --build -d
@@ -54,7 +56,7 @@ docker compose up --build -d
 - API Prometheus：`http://127.0.0.1:8000/metrics`
 - Outbox Relay Prometheus：`http://127.0.0.1:9101/metrics`
 - Notification Consumer Prometheus：`http://127.0.0.1:9102/metrics`
-- RabbitMQ 管理台：`http://127.0.0.1:15672`（开发账号 `hireflow` / `hireflow_dev_only`）
+- RabbitMQ 管理台：`http://127.0.0.1:15672`（账号 `hireflow`，密码来自本机 `.env`）
 
 ## 开发与验收
 
@@ -85,6 +87,8 @@ python -m pytest -q
 # 3 轮 × 批大小 10/50/100，采集吞吐、P95/P99、CPU 和内存
 .\scripts\relay_performance_matrix.ps1 -Events 500 -Runs 3 -BatchSizes 10,50,100
 ```
+
+CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
 | 脚本 | 验证结果 |
 | --- | --- |
