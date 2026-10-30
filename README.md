@@ -48,6 +48,7 @@ Copy-Item .env.example .env
 $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 docker compose up --build -d
 .\scripts\stack_smoke.ps1
+.\scripts\migration_smoke.ps1
 ```
 
 - Swagger UI：`http://127.0.0.1:8000/docs`
@@ -100,6 +101,7 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `ats_smoke.ps1` | 走通申请阶段、面试轮次、评分卡锁定、Offer 接受后自动录用、审计、通知与跨租户隔离。 |
 | `notification_idempotency_smoke.ps1` | 模拟同一 ATS 事件跨事务重复投递两次，验证 Inbox 与业务通知均只有一条。 |
 | `stack_smoke.ps1` | 检查 Compose 服务、兼容健康接口、进程 liveness 与 PostgreSQL/Redis readiness。 |
+| `migration_smoke.ps1` | 在脚本专用空数据库中验证 Alembic `head → base → head`，先校验目标库名且不触碰业务库。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
 | `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |

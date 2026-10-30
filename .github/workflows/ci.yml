@@ -158,6 +158,10 @@ jobs:
         shell: pwsh
         run: ./scripts/stack_smoke.ps1
 
+      - name: Verify Alembic upgrade and downgrade round-trip in an isolated database
+        shell: pwsh
+        run: ./scripts/migration_smoke.ps1
+
       - name: Verify application containers are non-root
         run: |
           for service in api notification-consumer outbox-relay; do
