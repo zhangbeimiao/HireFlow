@@ -1,9 +1,10 @@
 """Notification consumer persistence and idempotent business side effects."""
 
 from datetime import UTC, datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.models import Interview, Notification, NotificationInbox
@@ -38,16 +39,13 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
     except (KeyError, ValueError, TypeError) as error:
         raise InvalidEvent("event is missing a valid id, tenant_id, or interview_id") from error
 
-    inbox = await session.scalar(
-        select(NotificationInbox).where(
-            NotificationInbox.consumer_name == CONSUMER_NAME,
-            NotificationInbox.event_id == event_id,
-        )
-    )
-    if inbox is not None and inbox.status == "processed":
-        return
-    if inbox is None:
-        inbox = NotificationInbox(
+    # INSERT .. ON CONFLICT is the cross-process idempotency gate. A concurrent
+    # duplicate waits for the first transaction, then locks and observes the
+    # already-processed Inbox row instead of racing on the unique constraint.
+    await session.execute(
+        insert(NotificationInbox)
+        .values(
+            id=uuid4(),
             tenant_id=tenant_id,
             consumer_name=CONSUMER_NAME,
             event_id=event_id,
@@ -55,10 +53,20 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
             payload=event,
             status="processing",
         )
-        session.add(inbox)
-    else:
-        inbox.status = "processing"
-        inbox.last_error = None
+        .on_conflict_do_nothing(constraint="uq_notification_inbox_event")
+    )
+    inbox = await session.scalar(
+        select(NotificationInbox).where(
+            NotificationInbox.consumer_name == CONSUMER_NAME,
+            NotificationInbox.event_id == event_id,
+        ).with_for_update()
+    )
+    if inbox is None:  # Defensive: the insert or conflicting row must be visible in this transaction.
+        raise RuntimeError("notification Inbox idempotency row was not available")
+    if inbox is not None and inbox.status == "processed":
+        return
+    inbox.status = "processing"
+    inbox.last_error = None
 
     interview = await session.scalar(
         select(Interview).where(Interview.id == interview_id, Interview.tenant_id == tenant_id)

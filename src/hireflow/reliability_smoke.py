@@ -38,10 +38,15 @@ async def run() -> None:
         "event_type": "interview.scheduled",
         "payload": {"interview_id": str(interview.id)},
     }
+    async def consume_duplicate() -> None:
+        async with SessionLocal() as session:
+            await consume_notification_event(session, duplicate_event)
+
+    # Model two consumer processes receiving the same RabbitMQ delivery at once,
+    # followed by another redelivery after the first transaction committed.
+    await asyncio.gather(consume_duplicate(), consume_duplicate())
+    await consume_duplicate()
     async with SessionLocal() as session:
-        await consume_notification_event(session, duplicate_event)
-    async with SessionLocal() as session:
-        await consume_notification_event(session, duplicate_event)
         created_notifications = await session.scalar(
             select(func.count())
             .select_from(Notification)
@@ -95,7 +100,7 @@ async def run() -> None:
     if outbox.status != "pending" or outbox.next_attempt_at is None or outbox.next_attempt_at <= datetime.now(UTC):
         raise RuntimeError("outbox failure did not schedule a durable retry")
 
-    print("duplicate_delivery : 2 notifications from 1 source event")
+    print("duplicate_delivery : 2 concurrent deliveries plus redelivery -> 2 notifications")
     print("crash_recovery     : repeated committed event kept Inbox processed exactly once")
     print("manual_replay      : failed -> replay_requested -> replay_queued -> replay_requested")
     print("outbox_retry       : publishing -> pending with a persisted next_attempt_at")

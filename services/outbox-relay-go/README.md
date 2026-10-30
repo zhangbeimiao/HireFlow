@@ -27,7 +27,9 @@
 ## 验证
 
 ```powershell
-docker run --rm -v "${PWD}:/src" -w /src golang:1.23-alpine go test ./...
+go test -race ./...
 ```
 
-仓库级 `go_relay_recovery_smoke.ps1` 验证 Broker 中断时的持久化重试和恢复；`relay_performance.ps1` 在独立 Compose 项目中对比 Go/Python Relay，不访问主环境数据或队列。
+测试分为两层：纯单测覆盖 Publisher Confirm 的 ACK、NACK、关闭和超时；Docker 集成测试连接真实 PostgreSQL/RabbitMQ，覆盖 Channel/Connection 断开、租约过期重抢，以及 4 个 Relay 实例并行抢占不重复。通知消费者验收还会并发投递同一事件，确认 Inbox 唯一键只产生一组业务通知。
+
+仓库级 `go_relay_recovery_smoke.ps1` 验证 Broker 中断时的持久化恢复；`relay_performance.ps1` 在独立 Compose 项目中对比 Go/Python Relay，不访问主环境数据或队列。

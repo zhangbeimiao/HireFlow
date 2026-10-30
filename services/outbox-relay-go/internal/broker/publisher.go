@@ -87,8 +87,12 @@ func (p *Publisher) Publish(ctx context.Context, event outbox.Event) error {
 	}); err != nil {
 		return fmt.Errorf("publish event: %w", err)
 	}
+	return awaitConfirmation(ctx, p.confirms)
+}
+
+func awaitConfirmation(ctx context.Context, confirms <-chan amqp091.Confirmation) error {
 	select {
-	case confirmation, ok := <-p.confirms:
+	case confirmation, ok := <-confirms:
 		if !ok {
 			return errors.New("publisher confirm channel closed")
 		}
