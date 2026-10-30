@@ -3,10 +3,11 @@ package metrics
 import "github.com/prometheus/client_golang/prometheus"
 
 type Metrics struct {
-	Events          *prometheus.CounterVec
-	Backlog         *prometheus.GaugeVec
-	PublishDuration prometheus.Histogram
-	Claims          prometheus.Counter
+	Events            *prometheus.CounterVec
+	Backlog           *prometheus.GaugeVec
+	PublishDuration   prometheus.Histogram
+	Claims            prometheus.Counter
+	BrokerDisconnects prometheus.Counter
 }
 
 func New(registry prometheus.Registerer) *Metrics {
@@ -23,8 +24,14 @@ func New(registry prometheus.Registerer) *Metrics {
 		Claims: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "hireflow_outbox_claimed_total", Help: "Outbox rows atomically claimed by this relay.",
 		}),
+		BrokerDisconnects: prometheus.NewCounter(prometheus.CounterOpts{
+			Name: "hireflow_outbox_relay_broker_disconnects_total", Help: "RabbitMQ connection closures observed by this relay.",
+		}),
 	}
-	registry.MustRegister(metrics.Events, metrics.Backlog, metrics.PublishDuration, metrics.Claims)
+	registry.MustRegister(metrics.Events, metrics.Backlog, metrics.PublishDuration, metrics.Claims, metrics.BrokerDisconnects)
+	for _, outcome := range []string{"published", "retry", "state_update_failure"} {
+		metrics.Events.WithLabelValues(outcome)
+	}
 	return metrics
 }
 

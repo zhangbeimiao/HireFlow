@@ -80,6 +80,9 @@ func run(ctx context.Context, logger *slog.Logger, cfg config.Config, repository
 			generation := brokerGeneration.Add(1)
 			go func(active *broker.Publisher, activeGeneration uint64) {
 				<-active.NotifyClose()
+				if ctx.Err() == nil {
+					relayMetrics.BrokerDisconnects.Inc()
+				}
 				if brokerGeneration.Load() == activeGeneration {
 					healthServer.SetBrokerReady(false)
 				}

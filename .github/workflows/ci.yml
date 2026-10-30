@@ -61,6 +61,15 @@ jobs:
       - name: Install Locust test dependency
         run: python -m pip install -e ".[dev]"
 
+      - name: Validate observability configuration
+        run: |
+          python -m json.tool deploy/grafana/dashboards/hireflow-relay.json > /dev/null
+          docker compose -f docker-compose.yml -f docker-compose.observability.yml --profile observability config --quiet
+          docker run --rm --entrypoint promtool \
+            -v "$PWD/deploy/prometheus:/etc/prometheus:ro" \
+            prom/prometheus:v3.5.0 \
+            check config /etc/prometheus/prometheus.yml
+
       - name: Start full application stack
         run: docker compose up --build -d --wait --wait-timeout 90
 

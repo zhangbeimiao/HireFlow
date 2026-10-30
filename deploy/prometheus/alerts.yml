@@ -1,0 +1,56 @@
+groups:
+  - name: hireflow-relay
+    rules:
+      - alert: HireFlowOutboxBacklogHigh
+        expr: sum(hireflow_outbox_backlog{state="pending"}) > 100
+        for: 5m
+        labels:
+          severity: warning
+          service: outbox-relay
+        annotations:
+          summary: HireFlow Outbox backlog is growing
+          description: More than 100 pending Outbox events have remained for five minutes.
+
+      - alert: HireFlowRelayFailureRateHigh
+        expr: |
+          sum(rate(hireflow_outbox_relay_events_total{outcome=~"retry|state_update_failure"}[5m]))
+          /
+          clamp_min(sum(rate(hireflow_outbox_relay_events_total[5m])), 0.001)
+          > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          service: outbox-relay
+        annotations:
+          summary: HireFlow Relay failure rate exceeds 5%
+          description: Publish retries or durable-state update failures exceeded 5% for ten minutes.
+
+      - alert: HireFlowRelayRetriesHigh
+        expr: sum(increase(hireflow_outbox_relay_events_total{outcome="retry"}[10m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: outbox-relay
+        annotations:
+          summary: HireFlow Relay is retrying frequently
+          description: More than ten publish attempts entered retry during the last ten minutes.
+
+      - alert: HireFlowRelayBrokerDisconnected
+        expr: increase(hireflow_outbox_relay_broker_disconnects_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: outbox-relay
+        annotations:
+          summary: HireFlow Relay lost its RabbitMQ connection
+          description: At least one RabbitMQ connection closure was observed during the last five minutes.
+
+      - alert: HireFlowRelayTargetDown
+        expr: up{job="hireflow-outbox-relay"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: outbox-relay
+        annotations:
+          summary: HireFlow Relay metrics target is down
+          description: Prometheus could not scrape the Go Relay for two minutes.

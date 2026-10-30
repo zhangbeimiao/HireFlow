@@ -140,6 +140,6 @@ EXCLUDE USING gist (
 - Redis 用于列表缓存和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
 - API readiness 将 PostgreSQL 视为关键依赖；Redis 不可用时返回 `degraded` 但仍接流量，RabbitMQ 由 Outbox 解耦而不阻断同步 API。
 - 默认 Compose 使用 Go Relay；Python Relay 保留在 `python-relay` profile 中用于回归对比和紧急回退，不允许两者在同一环境长期同时运行。
-- 指标已暴露，尚未接入 Grafana 仪表盘与告警系统。
+- 可选 Prometheus/Grafana 观测栈已预置 Relay 积压、吞吐、Confirm P95/P99、重试和断连面板，以及积压、失败率、重试、断连和目标不可达告警。启动方式、指标样例、滚动升级与 TLS/密钥建议见 [Relay 运维说明](docs/relay_operations.md)。
 
 下一轮工程化优先级见 [工程审查记录](docs/engineering_review.md)。

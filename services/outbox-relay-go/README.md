@@ -24,6 +24,8 @@
 
 端点：`/live`、`/ready`、`/metrics`。Readiness 同时要求 PostgreSQL 和 RabbitMQ 可用，响应不会暴露连接串或异常原文。
 
+`/metrics` 提供 Outbox 积压、处理结果、Publisher Confirm 延迟和 RabbitMQ 断连次数。完整指标、Prometheus 告警、Grafana 仪表盘及滚动升级说明见 [`../../docs/relay_operations.md`](../../docs/relay_operations.md)。
+
 ## 验证
 
 ```powershell
