@@ -52,7 +52,9 @@ def test_same_timestamp_uses_id_as_cursor_tie_breaker() -> None:
     assert cursor.item_id == UUID(int=2)
 
 
-@pytest.mark.parametrize("items", [[], [{"id": str(UUID(int=1)), "created_at": "2026-10-30T00:00:00+00:00"}]])
+@pytest.mark.parametrize(
+    "items", [[], [{"id": str(UUID(int=1)), "created_at": "2026-10-30T00:00:00+00:00"}]]
+)
 def test_empty_or_exact_boundary_page_has_no_next_cursor(items: list[dict[str, str]]) -> None:
     response = Response()
 

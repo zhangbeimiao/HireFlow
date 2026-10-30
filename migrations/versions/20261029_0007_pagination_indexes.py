@@ -14,8 +14,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute(
-        "CREATE INDEX ix_jobs_tenant_created_id_desc "
-        "ON jobs (tenant_id, created_at DESC, id DESC)"
+        "CREATE INDEX ix_jobs_tenant_created_id_desc ON jobs (tenant_id, created_at DESC, id DESC)"
     )
     op.execute(
         "CREATE INDEX ix_candidates_tenant_created_id_desc "

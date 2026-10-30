@@ -169,6 +169,10 @@ jobs:
         shell: pwsh
         run: ./scripts/workbench_smoke.ps1
 
+      - name: Verify complete applicant tracking workflow
+        shell: pwsh
+        run: ./scripts/ats_smoke.ps1
+
       - name: Verify authentication, RBAC, and tenant isolation
         shell: pwsh
         run: ./scripts/security_smoke.ps1

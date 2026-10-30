@@ -102,7 +102,9 @@ def test_tenant_claim_tampering_is_rejected():
 
 
 def test_role_downgrade_is_enforced():
-    principal = current_principal(bearer(create_access_token(uuid4(), uuid4(), UserRole.INTERVIEWER)))
+    principal = current_principal(
+        bearer(create_access_token(uuid4(), uuid4(), UserRole.INTERVIEWER))
+    )
     owner_or_recruiter = require_roles(UserRole.OWNER, UserRole.RECRUITER)
     with pytest.raises(HTTPException) as raised:
         owner_or_recruiter(principal)

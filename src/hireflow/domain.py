@@ -13,6 +13,63 @@ class InterviewStatus(StrEnum):
     NO_SHOW = "no_show"
 
 
+class ApplicationStage(StrEnum):
+    APPLIED = "applied"
+    SCREENING = "screening"
+    INTERVIEW = "interview"
+    OFFER = "offer"
+    HIRED = "hired"
+    REJECTED = "rejected"
+    WITHDRAWN = "withdrawn"
+
+
+class OfferStatus(StrEnum):
+    DRAFT = "draft"
+    SENT = "sent"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    WITHDRAWN = "withdrawn"
+
+
+APPLICATION_TRANSITIONS: dict[ApplicationStage, set[ApplicationStage]] = {
+    ApplicationStage.APPLIED: {
+        ApplicationStage.SCREENING,
+        ApplicationStage.REJECTED,
+        ApplicationStage.WITHDRAWN,
+    },
+    ApplicationStage.SCREENING: {
+        ApplicationStage.INTERVIEW,
+        ApplicationStage.REJECTED,
+        ApplicationStage.WITHDRAWN,
+    },
+    ApplicationStage.INTERVIEW: {
+        ApplicationStage.OFFER,
+        ApplicationStage.REJECTED,
+        ApplicationStage.WITHDRAWN,
+    },
+    ApplicationStage.OFFER: {
+        ApplicationStage.HIRED,
+        ApplicationStage.REJECTED,
+        ApplicationStage.WITHDRAWN,
+    },
+    ApplicationStage.HIRED: set(),
+    ApplicationStage.REJECTED: set(),
+    ApplicationStage.WITHDRAWN: set(),
+}
+
+OFFER_TRANSITIONS: dict[OfferStatus, set[OfferStatus]] = {
+    OfferStatus.DRAFT: {OfferStatus.SENT, OfferStatus.WITHDRAWN},
+    OfferStatus.SENT: {
+        OfferStatus.ACCEPTED,
+        OfferStatus.DECLINED,
+        OfferStatus.WITHDRAWN,
+    },
+    OfferStatus.ACCEPTED: set(),
+    OfferStatus.DECLINED: set(),
+    OfferStatus.WITHDRAWN: set(),
+}
+
+
 ACTIVE_STATUSES = {InterviewStatus.SCHEDULED, InterviewStatus.CONFIRMED}
 
 ALLOWED_TRANSITIONS: dict[InterviewStatus, set[InterviewStatus]] = {
@@ -45,3 +102,11 @@ def overlaps(
 
 def can_transition(current: InterviewStatus, target: InterviewStatus) -> bool:
     return target in ALLOWED_TRANSITIONS[current]
+
+
+def can_transition_application(current: ApplicationStage, target: ApplicationStage) -> bool:
+    return target in APPLICATION_TRANSITIONS[current]
+
+
+def can_transition_offer(current: OfferStatus, target: OfferStatus) -> bool:
+    return target in OFFER_TRANSITIONS[current]

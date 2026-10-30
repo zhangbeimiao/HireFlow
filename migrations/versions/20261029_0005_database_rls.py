@@ -49,7 +49,9 @@ def upgrade() -> None:
     op.execute("ALTER ROLE hireflow BYPASSRLS")
     op.execute("GRANT CONNECT ON DATABASE hireflow TO hireflow_app")
     op.execute("GRANT USAGE ON SCHEMA public TO hireflow_app")
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO hireflow_app")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO hireflow_app"
+    )
     op.execute(
         "ALTER DEFAULT PRIVILEGES FOR ROLE hireflow IN SCHEMA public "
         "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO hireflow_app"

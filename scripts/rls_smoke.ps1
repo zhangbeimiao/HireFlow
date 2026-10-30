@@ -42,6 +42,13 @@ function Invoke-RlsSql {
 $withoutContext = Invoke-RlsSql "SELECT count(*) FROM candidates"
 if ($withoutContext[-1] -ne "0") { throw "API role read rows without a tenant context" }
 
+foreach ($table in @("application_audits", "interview_rounds", "interview_scorecards", "offers", "offer_audits")) {
+    $newTableWithoutContext = Invoke-RlsSql "SELECT count(*) FROM $table"
+    if ($newTableWithoutContext[-1] -ne "0") {
+        throw "API role read $table rows without a tenant context"
+    }
+}
+
 $withinTenant = Invoke-RlsSql "SELECT set_config('app.tenant_id', '$($candidateA.tenant_id)', false); SELECT count(*) FROM candidates WHERE id = '$($candidateA.id)'"
 if ($withinTenant[-1] -ne "1") { throw "API role could not read its own tenant row" }
 
@@ -56,5 +63,6 @@ if ($crossTenantCursor[-1] -ne "0") { throw "RLS allowed a tenant B cursor bound
     same_tenant_read = "1 row verified"
     cross_tenant_read = "0 rows verified"
     cross_tenant_cursor = "0 rows verified"
+    recruiting_pipeline_tables = "no-context RLS verified"
     result = "PostgreSQL RLS enforced for the API database role"
 } | Format-List

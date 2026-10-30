@@ -1,17 +1,19 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from hireflow.domain import InterviewStatus
+from hireflow.domain import ApplicationStage, InterviewStatus, OfferStatus
 
 
 class InterviewCreate(BaseModel):
     candidate_id: UUID
     interviewer_id: UUID
     job_id: UUID
+    application_id: UUID | None = None
+    round_id: UUID | None = None
     starts_at: datetime
     ends_at: datetime
     meeting_url: str | None = Field(default=None, max_length=500)
@@ -27,7 +29,9 @@ class InterviewCreate(BaseModel):
 
 class InterviewStatusUpdate(BaseModel):
     status: InterviewStatus
-    version: int = Field(ge=1, description="Version read by the caller; protects against lost updates")
+    version: int = Field(
+        ge=1, description="Version read by the caller; protects against lost updates"
+    )
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -37,6 +41,8 @@ class InterviewRead(BaseModel):
     candidate_id: UUID
     interviewer_id: UUID
     job_id: UUID
+    application_id: UUID | None
+    round_id: UUID | None
     starts_at: datetime
     ends_at: datetime
     status: InterviewStatus
@@ -161,7 +167,101 @@ class ApplicationCreate(BaseModel):
 class ApplicationRead(ApplicationCreate):
     id: UUID
     tenant_id: UUID
-    stage: str
+    stage: ApplicationStage
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class ApplicationStageUpdate(BaseModel):
+    stage: ApplicationStage
+    version: int = Field(ge=1, description="Version read by the caller; prevents lost updates")
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class ApplicationAuditRead(BaseModel):
+    id: UUID
+    application_id: UUID
+    from_stage: ApplicationStage | None
+    to_stage: ApplicationStage
+    reason: str | None
+    actor_id: UUID
+    created_at: datetime
+
+
+class InterviewRoundCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    sequence: int = Field(ge=1)
+    duration_minutes: int = Field(ge=15, le=480)
+    criteria: list[dict] = Field(default_factory=list, max_length=30)
+
+
+class InterviewRoundRead(InterviewRoundCreate):
+    id: UUID
+    tenant_id: UUID
+    job_id: UUID
+    created_at: datetime
+
+
+class Recommendation(StrEnum):
+    STRONG_HIRE = "strong_hire"
+    HIRE = "hire"
+    NO_HIRE = "no_hire"
+    STRONG_NO_HIRE = "strong_no_hire"
+
+
+class ScorecardUpsert(BaseModel):
+    recommendation: Recommendation
+    overall_score: int = Field(ge=1, le=5)
+    summary: str | None = Field(default=None, max_length=4000)
+    answers: dict = Field(default_factory=dict)
+    submit: bool = False
+
+
+class ScorecardRead(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    interview_id: UUID
+    interviewer_id: UUID
+    recommendation: Recommendation
+    overall_score: int
+    summary: str | None
+    answers: dict
+    submitted_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class OfferCreate(BaseModel):
+    application_id: UUID
+    salary_amount: int = Field(ge=0, description="Smallest currency unit, e.g. cents")
+    currency: str = Field(min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
+    start_date: date | None = None
+    expires_at: datetime | None = None
+
+
+class OfferStatusUpdate(BaseModel):
+    status: OfferStatus
+    version: int = Field(ge=1)
+
+
+class OfferRead(OfferCreate):
+    id: UUID
+    tenant_id: UUID
+    status: OfferStatus
+    version: int
+    created_by: UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class OfferAuditRead(BaseModel):
+    id: UUID
+    offer_id: UUID
+    from_status: OfferStatus | None
+    to_status: OfferStatus
+    actor_id: UUID
+    created_at: datetime
 
 
 class AvailabilityCreate(BaseModel):

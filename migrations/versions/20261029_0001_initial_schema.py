@@ -24,7 +24,9 @@ def upgrade() -> None:
         "tenants",
         sa.Column("id", uuid, primary_key=True),
         sa.Column("name", sa.String(120), nullable=False, unique=True),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_table(
         "users",
@@ -33,7 +35,9 @@ def upgrade() -> None:
         sa.Column("email", sa.String(320), nullable=False),
         sa.Column("display_name", sa.String(120), nullable=False),
         sa.Column("role", sa.String(30), nullable=False),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.UniqueConstraint("tenant_id", "email", name="uq_user_tenant_email"),
     )
     op.create_index("ix_users_tenant_id", "users", ["tenant_id"])
@@ -44,7 +48,9 @@ def upgrade() -> None:
         sa.Column("title", sa.String(200), nullable=False),
         sa.Column("hiring_manager_id", uuid, sa.ForeignKey("users.id")),
         sa.Column("status", sa.String(20), nullable=False, server_default="open"),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_jobs_tenant_id", "jobs", ["tenant_id"])
     op.create_table(
@@ -54,7 +60,9 @@ def upgrade() -> None:
         sa.Column("email", sa.String(320), nullable=False),
         sa.Column("full_name", sa.String(120), nullable=False),
         sa.Column("phone", sa.String(30)),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.UniqueConstraint("tenant_id", "email", name="uq_candidate_tenant_email"),
     )
     op.create_index("ix_candidates_tenant_id", "candidates", ["tenant_id"])
@@ -65,7 +73,9 @@ def upgrade() -> None:
         sa.Column("job_id", uuid, sa.ForeignKey("jobs.id"), nullable=False),
         sa.Column("candidate_id", uuid, sa.ForeignKey("candidates.id"), nullable=False),
         sa.Column("stage", sa.String(30), nullable=False, server_default="applied"),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.UniqueConstraint("tenant_id", "job_id", "candidate_id", name="uq_application"),
     )
     op.create_index("ix_applications_tenant_id", "applications", ["tenant_id"])
@@ -97,7 +107,9 @@ def upgrade() -> None:
         sa.Column("status", sa.String(20), nullable=False, server_default="scheduled"),
         sa.Column("version", sa.Integer, nullable=False, server_default="1"),
         sa.Column("meeting_url", sa.String(500)),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.execute(
         "ALTER TABLE interviews ADD CONSTRAINT interview_no_overlapping_interviewer "
@@ -111,7 +123,9 @@ def upgrade() -> None:
         sa.Column("from_status", sa.String(20)),
         sa.Column("to_status", sa.String(20), nullable=False),
         sa.Column("reason", sa.Text),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_table(
         "outbox_events",
@@ -122,7 +136,9 @@ def upgrade() -> None:
         sa.Column("payload", postgresql.JSONB, nullable=False),
         sa.Column("status", sa.String(20), nullable=False, server_default="pending"),
         sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
     )
     op.create_index("ix_outbox_events_tenant_id", "outbox_events", ["tenant_id"])
     op.create_index("ix_outbox_events_aggregate_id", "outbox_events", ["aggregate_id"])

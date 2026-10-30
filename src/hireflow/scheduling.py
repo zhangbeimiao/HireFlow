@@ -51,9 +51,13 @@ def subtract_busy_slots(
                     next_fragments.append(fragment)
                     continue
                 if fragment.starts_at < busy.starts_at:
-                    next_fragments.append(Availability(fragment.starts_at, min(busy.starts_at, fragment.ends_at)))
+                    next_fragments.append(
+                        Availability(fragment.starts_at, min(busy.starts_at, fragment.ends_at))
+                    )
                 if busy.ends_at < fragment.ends_at:
-                    next_fragments.append(Availability(max(busy.ends_at, fragment.starts_at), fragment.ends_at))
+                    next_fragments.append(
+                        Availability(max(busy.ends_at, fragment.starts_at), fragment.ends_at)
+                    )
             fragments = next_fragments
         result.extend(fragments)
     return result

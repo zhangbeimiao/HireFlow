@@ -36,6 +36,22 @@ from hireflow.pagination import (
     decode_cursor,
     encode_cursor,
 )
+from hireflow.pipeline import (
+    PipelineInvalidTransition,
+    PipelineStaleVersion,
+    ScorecardLocked,
+    create_interview_round,
+    create_offer,
+    list_application_audits,
+    list_applications,
+    list_interview_rounds,
+    list_offer_audits,
+    list_offers,
+    list_scorecards,
+    transition_application,
+    transition_offer,
+    upsert_scorecard,
+)
 from hireflow.rate_limit import enforce_rate_limit
 from hireflow.recruiting import (
     DuplicateResource,
@@ -55,8 +71,10 @@ from hireflow.recruiting import (
 )
 from hireflow.schemas import (
     AccessTokenRead,
+    ApplicationAuditRead,
     ApplicationCreate,
     ApplicationRead,
+    ApplicationStageUpdate,
     AuditRead,
     AvailabilityCreate,
     AvailabilityRead,
@@ -67,6 +85,8 @@ from hireflow.schemas import (
     DashboardOverviewRead,
     InterviewCreate,
     InterviewRead,
+    InterviewRoundCreate,
+    InterviewRoundRead,
     InterviewStatusUpdate,
     JobCreate,
     JobRead,
@@ -74,8 +94,14 @@ from hireflow.schemas import (
     LoginRequest,
     NotificationFailureRead,
     NotificationRead,
+    OfferAuditRead,
+    OfferCreate,
+    OfferRead,
+    OfferStatusUpdate,
     ScheduleSuggestionRead,
     ScheduleSuggestionRequest,
+    ScorecardRead,
+    ScorecardUpsert,
     TenantBootstrap,
     UserCreate,
     UserRead,
@@ -280,7 +306,9 @@ async def register_user(
 @app.get("/v1/users", response_model=list[UserRead])
 async def get_users(
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ) -> list[User]:
     return await list_users(session, tenant_id)
@@ -291,7 +319,9 @@ async def register_job(
     payload: JobCreate,
     request: Request,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
@@ -309,7 +339,9 @@ async def get_jobs(
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
 ) -> list[JobRead]:
     page_cursor = _decode_page_cursor(cursor)
 
@@ -344,7 +376,9 @@ async def revise_job(
     payload: JobUpdate,
     request: Request,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
@@ -382,7 +416,9 @@ async def get_candidates(
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
 ) -> list[CandidateRead]:
     page_cursor = _decode_page_cursor(cursor)
 
@@ -436,15 +472,98 @@ async def revise_candidate(
 async def submit_application(
     payload: ApplicationCreate,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
+    principal: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
-        return await create_application(session, tenant_id, payload)
+        return await create_application(session, tenant_id, principal.user_id, payload)
     except (TenantNotFound, InvalidReference) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except DuplicateResource as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/applications", response_model=list[ApplicationRead])
+async def get_applications(
+    response: Response,
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    cursor: str | None = Query(default=None, max_length=512),
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    rows = await list_applications(
+        session, tenant_id, limit=limit, cursor=_decode_page_cursor(cursor)
+    )
+    return _page_response(rows, limit, response)
+
+
+@app.post("/v1/applications/{application_id}/stage", response_model=ApplicationRead)
+async def update_application_stage(
+    application_id: UUID,
+    payload: ApplicationStageUpdate,
+    tenant_id: UUID = Depends(current_tenant),
+    principal: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    try:
+        return await transition_application(
+            session, tenant_id, principal.user_id, application_id, payload
+        )
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (PipelineInvalidTransition, PipelineStaleVersion) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/applications/{application_id}/audit", response_model=list[ApplicationAuditRead])
+async def application_audit(
+    application_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    return await list_application_audits(session, tenant_id, application_id)
+
+
+@app.post(
+    "/v1/jobs/{job_id}/rounds",
+    response_model=InterviewRoundRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_interview_round(
+    job_id: UUID,
+    payload: InterviewRoundCreate,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    try:
+        return await create_interview_round(session, tenant_id, job_id, payload)
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except DuplicateResource as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/jobs/{job_id}/rounds", response_model=list[InterviewRoundRead])
+async def get_interview_rounds(
+    job_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    return await list_interview_rounds(session, tenant_id, job_id)
 
 
 @app.post(
@@ -475,7 +594,9 @@ async def submit_interviewer_availability(
     payload: AvailabilityCreate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
-        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
+        require_roles(
+            UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER
+        )
     ),
     session: AsyncSession = Depends(tenant_session),
 ):
@@ -489,12 +610,18 @@ async def submit_interviewer_availability(
 async def scheduling_suggestion(
     payload: ScheduleSuggestionRequest,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
         slot = await suggest_earliest_slot(
-            session, tenant_id, payload.candidate_id, payload.interviewer_id, payload.duration_minutes
+            session,
+            tenant_id,
+            payload.candidate_id,
+            payload.interviewer_id,
+            payload.duration_minutes,
         )
     except (TenantNotFound, InvalidReference) as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
@@ -507,7 +634,9 @@ async def scheduling_suggestion(
 async def schedule_interview(
     payload: InterviewCreate,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
     try:
@@ -524,7 +653,9 @@ async def get_interviews(
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ) -> list[DashboardInterviewRead]:
     page_cursor = _decode_page_cursor(cursor)
@@ -538,7 +669,9 @@ async def update_status(
     payload: InterviewStatusUpdate,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
-        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
+        require_roles(
+            UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER
+        )
     ),
     session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
@@ -556,7 +689,9 @@ async def update_status(
 async def interview_audit(
     interview_id: UUID,
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     return await list_audits(session, tenant_id, interview_id)
@@ -567,7 +702,9 @@ async def get_interview(
     interview_id: UUID,
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
-        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER)
+        require_roles(
+            UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER, UserRole.INTERVIEWER
+        )
     ),
     session: AsyncSession = Depends(tenant_session),
 ) -> Interview:
@@ -579,13 +716,95 @@ async def get_interview(
     return interview
 
 
+@app.put("/v1/interviews/{interview_id}/scorecard", response_model=ScorecardRead)
+async def save_scorecard(
+    interview_id: UUID,
+    payload: ScorecardUpsert,
+    tenant_id: UUID = Depends(current_tenant),
+    principal: Principal = Depends(require_roles(UserRole.INTERVIEWER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    try:
+        return await upsert_scorecard(session, tenant_id, principal.user_id, interview_id, payload)
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ScorecardLocked as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/interviews/{interview_id}/scorecards", response_model=list[ScorecardRead])
+async def get_scorecards(
+    interview_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    return await list_scorecards(session, tenant_id, interview_id)
+
+
+@app.post("/v1/offers", response_model=OfferRead, status_code=status.HTTP_201_CREATED)
+async def draft_offer(
+    payload: OfferCreate,
+    tenant_id: UUID = Depends(current_tenant),
+    principal: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    try:
+        return await create_offer(session, tenant_id, principal.user_id, payload)
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (DuplicateResource, PipelineInvalidTransition) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/offers", response_model=list[OfferRead])
+async def get_offers(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    return await list_offers(session, tenant_id)
+
+
+@app.post("/v1/offers/{offer_id}/status", response_model=OfferRead)
+async def update_offer_status(
+    offer_id: UUID,
+    payload: OfferStatusUpdate,
+    tenant_id: UUID = Depends(current_tenant),
+    principal: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    try:
+        return await transition_offer(session, tenant_id, principal.user_id, offer_id, payload)
+    except InvalidReference as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (PipelineInvalidTransition, PipelineStaleVersion) as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/v1/offers/{offer_id}/audit", response_model=list[OfferAuditRead])
+async def get_offer_audit(
+    offer_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    return await list_offer_audits(session, tenant_id, offer_id)
+
+
 @app.get("/v1/notifications", response_model=list[NotificationRead])
 async def list_notifications(
     response: Response,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
     tenant_id: UUID = Depends(current_tenant),
-    _: Principal = Depends(require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     page_cursor = _decode_page_cursor(cursor)
@@ -615,7 +834,9 @@ async def list_notification_failures(
     return list(rows)
 
 
-@app.post("/v1/admin/notification-failures/{event_id}/replay", response_model=NotificationFailureRead)
+@app.post(
+    "/v1/admin/notification-failures/{event_id}/replay", response_model=NotificationFailureRead
+)
 async def replay_notification_failure(
     event_id: str,
     tenant_id: UUID = Depends(current_tenant),

@@ -2,7 +2,16 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from hireflow.domain import InterviewStatus, assert_valid_interval, can_transition, overlaps
+from hireflow.domain import (
+    ApplicationStage,
+    InterviewStatus,
+    OfferStatus,
+    assert_valid_interval,
+    can_transition,
+    can_transition_application,
+    can_transition_offer,
+    overlaps,
+)
 from hireflow.outbox import retry_after
 from hireflow.scheduling import Availability, earliest_common_slot, subtract_busy_slots
 
@@ -12,11 +21,21 @@ def at(value: str) -> datetime:
 
 
 def test_adjacent_interviews_do_not_overlap() -> None:
-    assert not overlaps(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"), at("2026-11-01T10:00:00+08:00"), at("2026-11-01T11:00:00+08:00"))
+    assert not overlaps(
+        at("2026-11-01T09:00:00+08:00"),
+        at("2026-11-01T10:00:00+08:00"),
+        at("2026-11-01T10:00:00+08:00"),
+        at("2026-11-01T11:00:00+08:00"),
+    )
 
 
 def test_overlapping_interviews_are_detected() -> None:
-    assert overlaps(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"), at("2026-11-01T09:30:00+08:00"), at("2026-11-01T10:30:00+08:00"))
+    assert overlaps(
+        at("2026-11-01T09:00:00+08:00"),
+        at("2026-11-01T10:00:00+08:00"),
+        at("2026-11-01T09:30:00+08:00"),
+        at("2026-11-01T10:30:00+08:00"),
+    )
 
 
 def test_terminal_state_cannot_be_changed() -> None:
@@ -61,19 +80,52 @@ def test_scheduler_removes_booked_interval_before_matching() -> None:
 
 
 def test_scheduler_returns_none_when_availability_does_not_intersect() -> None:
-    assert earliest_common_slot(
-        [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
-        [Availability(at("2026-11-01T10:00:00+08:00"), at("2026-11-01T11:00:00+08:00"))],
-        timedelta(minutes=30),
-    ) is None
+    assert (
+        earliest_common_slot(
+            [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
+            [Availability(at("2026-11-01T10:00:00+08:00"), at("2026-11-01T11:00:00+08:00"))],
+            timedelta(minutes=30),
+        )
+        is None
+    )
 
 
 def test_scheduler_does_not_offer_a_slot_fully_consumed_by_busy_time() -> None:
-    assert subtract_busy_slots(
-        [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
-        [Availability(at("2026-11-01T08:30:00+08:00"), at("2026-11-01T10:30:00+08:00"))],
-    ) == []
+    assert (
+        subtract_busy_slots(
+            [Availability(at("2026-11-01T09:00:00+08:00"), at("2026-11-01T10:00:00+08:00"))],
+            [Availability(at("2026-11-01T08:30:00+08:00"), at("2026-11-01T10:30:00+08:00"))],
+        )
+        == []
+    )
 
 
 def test_cancellation_is_allowed_from_scheduled_state() -> None:
     assert can_transition(InterviewStatus.SCHEDULED, InterviewStatus.CANCELLED)
+
+
+def test_application_pipeline_allows_only_forward_business_transitions() -> None:
+    assert can_transition_application(ApplicationStage.APPLIED, ApplicationStage.SCREENING)
+    assert can_transition_application(ApplicationStage.INTERVIEW, ApplicationStage.OFFER)
+    assert can_transition_application(ApplicationStage.OFFER, ApplicationStage.HIRED)
+    assert not can_transition_application(ApplicationStage.SCREENING, ApplicationStage.HIRED)
+    assert not can_transition_application(ApplicationStage.HIRED, ApplicationStage.REJECTED)
+
+
+def test_application_can_exit_from_each_active_stage() -> None:
+    for stage in (
+        ApplicationStage.APPLIED,
+        ApplicationStage.SCREENING,
+        ApplicationStage.INTERVIEW,
+        ApplicationStage.OFFER,
+    ):
+        assert can_transition_application(stage, ApplicationStage.REJECTED)
+        assert can_transition_application(stage, ApplicationStage.WITHDRAWN)
+
+
+def test_offer_requires_send_before_candidate_decision() -> None:
+    assert can_transition_offer(OfferStatus.DRAFT, OfferStatus.SENT)
+    assert not can_transition_offer(OfferStatus.DRAFT, OfferStatus.ACCEPTED)
+    assert can_transition_offer(OfferStatus.SENT, OfferStatus.ACCEPTED)
+    assert can_transition_offer(OfferStatus.SENT, OfferStatus.DECLINED)
+    assert not can_transition_offer(OfferStatus.ACCEPTED, OfferStatus.WITHDRAWN)

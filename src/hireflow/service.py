@@ -6,7 +6,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.db import set_tenant_context
 from hireflow.domain import ACTIVE_STATUSES, InterviewStatus, can_transition, overlaps
-from hireflow.models import Candidate, Interview, InterviewAudit, Job, OutboxEvent, User
+from hireflow.models import (
+    Application,
+    Candidate,
+    Interview,
+    InterviewAudit,
+    InterviewRound,
+    Job,
+    OutboxEvent,
+    User,
+)
 from hireflow.pagination import PageCursor
 from hireflow.recruiting import InvalidReference
 from hireflow.schemas import DashboardInterviewRead, InterviewCreate, InterviewStatusUpdate
@@ -33,14 +42,47 @@ async def create_interview(
     makes local SQLite behaviour understandable and returns a helpful 409 before the insert.
     """
     candidate = await session.scalar(
-        select(Candidate).where(Candidate.id == payload.candidate_id, Candidate.tenant_id == tenant_id)
+        select(Candidate).where(
+            Candidate.id == payload.candidate_id, Candidate.tenant_id == tenant_id
+        )
     )
     interviewer = await session.scalar(
         select(User).where(User.id == payload.interviewer_id, User.tenant_id == tenant_id)
     )
-    job = await session.scalar(select(Job).where(Job.id == payload.job_id, Job.tenant_id == tenant_id))
+    job = await session.scalar(
+        select(Job).where(Job.id == payload.job_id, Job.tenant_id == tenant_id)
+    )
     if candidate is None or interviewer is None or job is None:
-        raise InvalidReference("candidate_id, interviewer_id, and job_id must all belong to this tenant")
+        raise InvalidReference(
+            "candidate_id, interviewer_id, and job_id must all belong to this tenant"
+        )
+
+    if payload.application_id is not None:
+        application = await session.scalar(
+            select(Application).where(
+                Application.id == payload.application_id,
+                Application.tenant_id == tenant_id,
+                Application.job_id == payload.job_id,
+                Application.candidate_id == payload.candidate_id,
+            )
+        )
+        if application is None:
+            raise InvalidReference("application_id must match the candidate, job, and tenant")
+    if payload.round_id is not None:
+        round_ = await session.scalar(
+            select(InterviewRound).where(
+                InterviewRound.id == payload.round_id,
+                InterviewRound.tenant_id == tenant_id,
+                InterviewRound.job_id == payload.job_id,
+            )
+        )
+        if round_ is None:
+            raise InvalidReference("round_id must belong to the selected job and tenant")
+        duration_minutes = int((payload.ends_at - payload.starts_at).total_seconds() // 60)
+        if duration_minutes != round_.duration_minutes:
+            raise InvalidReference(
+                f"interview duration must match round duration ({round_.duration_minutes} minutes)"
+            )
 
     existing = await session.scalars(
         select(Interview).where(
@@ -60,6 +102,8 @@ async def create_interview(
         candidate_id=payload.candidate_id,
         interviewer_id=payload.interviewer_id,
         job_id=payload.job_id,
+        application_id=payload.application_id,
+        round_id=payload.round_id,
         starts_at=payload.starts_at,
         ends_at=payload.ends_at,
         meeting_url=payload.meeting_url,
@@ -88,6 +132,10 @@ async def create_interview(
                     "interview_id": str(interview.id),
                     "candidate_id": str(interview.candidate_id),
                     "interviewer_id": str(interview.interviewer_id),
+                    "application_id": str(interview.application_id)
+                    if interview.application_id
+                    else None,
+                    "round_id": str(interview.round_id) if interview.round_id else None,
                     "starts_at": interview.starts_at.isoformat(),
                     "ends_at": interview.ends_at.isoformat(),
                 },
@@ -98,7 +146,9 @@ async def create_interview(
         # The exclusion constraint is the final authority when two application instances
         # pass the read-time probe concurrently. Keep its database error behind one 409 contract.
         await session.rollback()
-        raise SchedulingConflict("interviewer already has an overlapping active interview") from error
+        raise SchedulingConflict(
+            "interviewer already has an overlapping active interview"
+        ) from error
     return interview
 
 
@@ -155,7 +205,9 @@ async def transition_interview(
     return await session.scalar(select(Interview).where(Interview.id == interview_id))
 
 
-async def list_audits(session: AsyncSession, tenant_id: UUID, interview_id: UUID) -> list[InterviewAudit]:
+async def list_audits(
+    session: AsyncSession, tenant_id: UUID, interview_id: UUID
+) -> list[InterviewAudit]:
     # Join through interviews ensures one tenant cannot enumerate another tenant's audit records.
     rows = await session.scalars(
         select(InterviewAudit)

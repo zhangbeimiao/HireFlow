@@ -25,7 +25,9 @@ def retry_count(message: aio_pika.abc.AbstractIncomingMessage) -> int:
     return int(message.headers.get("x-hireflow-retry-count", 0))
 
 
-async def publish_event(channel: aio_pika.abc.AbstractChannel, event: dict, routing_key: str, retries: int) -> None:
+async def publish_event(
+    channel: aio_pika.abc.AbstractChannel, event: dict, routing_key: str, retries: int
+) -> None:
     await channel.default_exchange.publish(
         aio_pika.Message(
             body=json.dumps(event).encode(),
@@ -39,7 +41,9 @@ async def publish_event(channel: aio_pika.abc.AbstractChannel, event: dict, rout
     )
 
 
-async def handle_message(message: aio_pika.abc.AbstractIncomingMessage, channel: aio_pika.abc.AbstractChannel) -> None:
+async def handle_message(
+    message: aio_pika.abc.AbstractIncomingMessage, channel: aio_pika.abc.AbstractChannel
+) -> None:
     event: dict | None = None
     try:
         event = json.loads(message.body)

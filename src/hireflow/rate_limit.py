@@ -44,7 +44,9 @@ async def enforce_rate_limit(
     }
     if count > limit:
         headers["Retry-After"] = str(ttl or WINDOW_SECONDS)
-        return JSONResponse(status_code=429, content={"detail": "rate limit exceeded"}, headers=headers)
+        return JSONResponse(
+            status_code=429, content={"detail": "rate limit exceeded"}, headers=headers
+        )
     response = await call_next(request)
     response.headers.update(headers)
     return response

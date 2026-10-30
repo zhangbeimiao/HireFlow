@@ -26,7 +26,9 @@ async def add_candidate_availability(
     )
     if candidate is None:
         raise InvalidReference("candidate_id does not belong to this tenant")
-    availability = CandidateAvailability(tenant_id=tenant_id, candidate_id=candidate_id, **payload.model_dump())
+    availability = CandidateAvailability(
+        tenant_id=tenant_id, candidate_id=candidate_id, **payload.model_dump()
+    )
     session.add(availability)
     await session.commit()
     return availability
@@ -50,7 +52,11 @@ async def add_interviewer_availability(
 
 
 async def suggest_earliest_slot(
-    session: AsyncSession, tenant_id: UUID, candidate_id: UUID, interviewer_id: UUID, duration_minutes: int
+    session: AsyncSession,
+    tenant_id: UUID,
+    candidate_id: UUID,
+    interviewer_id: UUID,
+    duration_minutes: int,
 ) -> Availability | None:
     await require_tenant(session, tenant_id)
     candidate = await session.scalar(
@@ -61,26 +67,39 @@ async def suggest_earliest_slot(
     )
     if candidate is None or interviewer is None:
         raise InvalidReference("candidate_id and interviewer_id must both belong to this tenant")
-    candidate_slots = list(await session.scalars(
-        select(CandidateAvailability).where(
-            CandidateAvailability.tenant_id == tenant_id,
-            CandidateAvailability.candidate_id == candidate_id,
+    candidate_slots = list(
+        await session.scalars(
+            select(CandidateAvailability).where(
+                CandidateAvailability.tenant_id == tenant_id,
+                CandidateAvailability.candidate_id == candidate_id,
+            )
         )
-    ))
-    interviewer_slots = list(await session.scalars(
-        select(InterviewerAvailability).where(
-            InterviewerAvailability.tenant_id == tenant_id,
-            InterviewerAvailability.interviewer_id == interviewer_id,
+    )
+    interviewer_slots = list(
+        await session.scalars(
+            select(InterviewerAvailability).where(
+                InterviewerAvailability.tenant_id == tenant_id,
+                InterviewerAvailability.interviewer_id == interviewer_id,
+            )
         )
-    ))
-    booked = list(await session.scalars(
-        select(Interview).where(
-            Interview.tenant_id == tenant_id,
-            Interview.status.in_([status.value for status in ACTIVE_STATUSES]),
-            or_(Interview.candidate_id == candidate_id, Interview.interviewer_id == interviewer_id),
+    )
+    booked = list(
+        await session.scalars(
+            select(Interview).where(
+                Interview.tenant_id == tenant_id,
+                Interview.status.in_([status.value for status in ACTIVE_STATUSES]),
+                or_(
+                    Interview.candidate_id == candidate_id,
+                    Interview.interviewer_id == interviewer_id,
+                ),
+            )
         )
-    ))
-    candidate_busy = [Availability(item.starts_at, item.ends_at) for item in booked if item.candidate_id == candidate_id]
+    )
+    candidate_busy = [
+        Availability(item.starts_at, item.ends_at)
+        for item in booked
+        if item.candidate_id == candidate_id
+    ]
     interviewer_busy = [
         Availability(item.starts_at, item.ends_at)
         for item in booked
@@ -91,7 +110,8 @@ async def suggest_earliest_slot(
             [Availability(slot.starts_at, slot.ends_at) for slot in candidate_slots], candidate_busy
         ),
         subtract_busy_slots(
-            [Availability(slot.starts_at, slot.ends_at) for slot in interviewer_slots], interviewer_busy
+            [Availability(slot.starts_at, slot.ends_at) for slot in interviewer_slots],
+            interviewer_busy,
         ),
         timedelta(minutes=duration_minutes),
     )

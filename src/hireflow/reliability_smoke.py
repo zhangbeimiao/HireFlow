@@ -25,9 +25,13 @@ from hireflow.outbox import record_publish_failure
 
 async def run() -> None:
     async with SessionLocal() as session:
-        interview = await session.scalar(select(Interview).order_by(Interview.created_at.desc()).limit(1))
+        interview = await session.scalar(
+            select(Interview).order_by(Interview.created_at.desc()).limit(1)
+        )
         if interview is None:
-            raise RuntimeError("create an interview first (run scripts/demo.ps1 or workbench_smoke.ps1)")
+            raise RuntimeError(
+                "create an interview first (run scripts/demo.ps1 or workbench_smoke.ps1)"
+            )
         tenant_id = interview.tenant_id
 
     # If a consumer commits business side effects and crashes before ack, RabbitMQ redelivers the
@@ -38,6 +42,7 @@ async def run() -> None:
         "event_type": "interview.scheduled",
         "payload": {"interview_id": str(interview.id)},
     }
+
     async def consume_duplicate() -> None:
         async with SessionLocal() as session:
             await consume_notification_event(session, duplicate_event)
@@ -55,7 +60,11 @@ async def run() -> None:
         duplicate_inbox = await session.scalar(
             select(NotificationInbox).where(NotificationInbox.event_id == duplicate_event["id"])
         )
-    if created_notifications != 2 or duplicate_inbox is None or duplicate_inbox.status != "processed":
+    if (
+        created_notifications != 2
+        or duplicate_inbox is None
+        or duplicate_inbox.status != "processed"
+    ):
         raise RuntimeError("duplicate delivery was not idempotent")
 
     # A validly shaped but invalid reference follows the same failure persistence and manual replay
@@ -97,7 +106,11 @@ async def run() -> None:
         await session.commit()
         await record_publish_failure(session, outbox.id)
         await session.refresh(outbox)
-    if outbox.status != "pending" or outbox.next_attempt_at is None or outbox.next_attempt_at <= datetime.now(UTC):
+    if (
+        outbox.status != "pending"
+        or outbox.next_attempt_at is None
+        or outbox.next_attempt_at <= datetime.now(UTC)
+    ):
         raise RuntimeError("outbox failure did not schedule a durable retry")
 
     print("duplicate_delivery : 2 concurrent deliveries plus redelivery -> 2 notifications")

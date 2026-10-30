@@ -61,7 +61,9 @@ async def _load_from_database(resource: str, loader: CacheLoader) -> list[Any]:
 
 
 def _serialize(rows: list[Any], schema: type[BaseModel]) -> list[dict[str, Any]]:
-    return [schema.model_validate(row, from_attributes=True).model_dump(mode="json") for row in rows]
+    return [
+        schema.model_validate(row, from_attributes=True).model_dump(mode="json") for row in rows
+    ]
 
 
 async def cached_list(

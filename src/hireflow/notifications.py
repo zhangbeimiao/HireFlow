@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hireflow.models import Interview, Notification, NotificationInbox
+from hireflow.models import Application, Interview, Job, Notification, NotificationInbox, Offer
 from hireflow.observability import NOTIFICATION_FAILURE_BACKLOG
 
 CONSUMER_NAME = "notification-consumer"
@@ -29,15 +29,30 @@ def _message_for(event_type: str, interview: Interview) -> tuple[str, str]:
     raise InvalidEvent(f"unsupported event type: {event_type}")
 
 
+def _application_message(event_type: str, application: Application) -> tuple[str, str]:
+    if event_type == "application.created":
+        return "申请已进入流程", "招聘团队已收到你的申请。"
+    if event_type == "application.stage_changed":
+        return "申请进度已更新", f"当前阶段：{application.stage}"
+    raise InvalidEvent(f"unsupported event type: {event_type}")
+
+
+def _offer_message(event_type: str, offer: Offer) -> tuple[str, str]:
+    if event_type == "offer.created":
+        return "Offer 正在准备", "招聘团队已开始准备录用方案。"
+    if event_type == "offer.status_changed":
+        return "Offer 状态已更新", f"当前状态：{offer.status}"
+    raise InvalidEvent(f"unsupported event type: {event_type}")
+
+
 async def consume_notification_event(session: AsyncSession, event: dict) -> None:
     """Create recipient notifications exactly once in the same DB transaction as Inbox state."""
     try:
         event_id = str(event["id"])
         tenant_id = UUID(str(event["tenant_id"]))
         event_type = str(event["event_type"])
-        interview_id = UUID(str(event["payload"]["interview_id"]))
     except (KeyError, ValueError, TypeError) as error:
-        raise InvalidEvent("event is missing a valid id, tenant_id, or interview_id") from error
+        raise InvalidEvent("event is missing a valid id or tenant_id") from error
 
     # INSERT .. ON CONFLICT is the cross-process idempotency gate. A concurrent
     # duplicate waits for the first transaction, then locks and observes the
@@ -56,43 +71,99 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
         .on_conflict_do_nothing(constraint="uq_notification_inbox_event")
     )
     inbox = await session.scalar(
-        select(NotificationInbox).where(
+        select(NotificationInbox)
+        .where(
             NotificationInbox.consumer_name == CONSUMER_NAME,
             NotificationInbox.event_id == event_id,
-        ).with_for_update()
+        )
+        .with_for_update()
     )
-    if inbox is None:  # Defensive: the insert or conflicting row must be visible in this transaction.
+    if (
+        inbox is None
+    ):  # Defensive: the insert or conflicting row must be visible in this transaction.
         raise RuntimeError("notification Inbox idempotency row was not available")
     if inbox is not None and inbox.status == "processed":
         return
     inbox.status = "processing"
     inbox.last_error = None
 
-    interview = await session.scalar(
-        select(Interview).where(Interview.id == interview_id, Interview.tenant_id == tenant_id)
-    )
-    if interview is None:
-        raise InvalidEvent("event references an interview outside its tenant")
+    recipients: list[tuple[str, UUID]]
+    if event_type.startswith("interview."):
+        try:
+            interview_id = UUID(str(event["payload"]["interview_id"]))
+        except (KeyError, ValueError, TypeError) as error:
+            raise InvalidEvent("interview event is missing interview_id") from error
+        interview = await session.scalar(
+            select(Interview).where(Interview.id == interview_id, Interview.tenant_id == tenant_id)
+        )
+        if interview is None:
+            raise InvalidEvent("event references an interview outside its tenant")
+        title, content = _message_for(event_type, interview)
+        recipients = [
+            ("candidate", interview.candidate_id),
+            ("interviewer", interview.interviewer_id),
+        ]
+    elif event_type.startswith("application."):
+        try:
+            application_id = UUID(str(event["payload"]["application_id"]))
+        except (KeyError, ValueError, TypeError) as error:
+            raise InvalidEvent("application event is missing application_id") from error
+        application = await session.scalar(
+            select(Application).where(
+                Application.id == application_id, Application.tenant_id == tenant_id
+            )
+        )
+        if application is None:
+            raise InvalidEvent("event references an application outside its tenant")
+        title, content = _application_message(event_type, application)
+        recipients = [("candidate", application.candidate_id)]
+    elif event_type.startswith("offer."):
+        try:
+            offer_id = UUID(str(event["payload"]["offer_id"]))
+        except (KeyError, ValueError, TypeError) as error:
+            raise InvalidEvent("offer event is missing offer_id") from error
+        row = await session.execute(
+            select(Offer, Application)
+            .join(Application, Application.id == Offer.application_id)
+            .where(Offer.id == offer_id, Offer.tenant_id == tenant_id)
+        )
+        offer_row = row.one_or_none()
+        if offer_row is None:
+            raise InvalidEvent("event references an offer outside its tenant")
+        offer, application = offer_row
+        title, content = _offer_message(event_type, offer)
+        recipients = [("candidate", application.candidate_id)]
+    elif event_type == "scorecard.submitted":
+        try:
+            interview_id = UUID(str(event["payload"]["interview_id"]))
+        except (KeyError, ValueError, TypeError) as error:
+            raise InvalidEvent("scorecard event is missing interview_id") from error
+        row = await session.execute(
+            select(Interview, Job)
+            .join(Job, Job.id == Interview.job_id)
+            .where(Interview.id == interview_id, Interview.tenant_id == tenant_id)
+        )
+        interview_row = row.one_or_none()
+        if interview_row is None:
+            raise InvalidEvent("event references an interview outside its tenant")
+        interview, job = interview_row
+        title, content = "面试评分已提交", "面试官已提交评分卡，可进入招聘决策。"
+        recipient_id = job.hiring_manager_id or interview.interviewer_id
+        recipients = [("hiring_manager", recipient_id)]
+    else:
+        raise InvalidEvent(f"unsupported event type: {event_type}")
 
-    title, content = _message_for(event_type, interview)
     session.add_all(
         [
             Notification(
                 tenant_id=tenant_id,
                 source_event_id=event_id,
-                recipient_type="candidate",
-                recipient_id=interview.candidate_id,
+                recipient_type=recipient_type,
+                recipient_id=recipient_id,
                 title=title,
                 content=content,
-            ),
-            Notification(
-                tenant_id=tenant_id,
-                source_event_id=event_id,
-                recipient_type="interviewer",
-                recipient_id=interview.interviewer_id,
-                title=title,
-                content=content,
-            ),
+            )
+            for recipient_type, recipient_id in recipients
         ]
     )
     inbox.status = "processed"
@@ -133,7 +204,9 @@ async def record_consumer_failure(session: AsyncSession, event: dict, error: Exc
     await session.commit()
 
 
-async def request_replay(session: AsyncSession, tenant_id: UUID, event_id: str) -> NotificationInbox | None:
+async def request_replay(
+    session: AsyncSession, tenant_id: UUID, event_id: str
+) -> NotificationInbox | None:
     inbox = await session.scalar(
         select(NotificationInbox).where(
             NotificationInbox.tenant_id == tenant_id,
@@ -180,6 +253,8 @@ async def refresh_notification_metrics(session: AsyncSession) -> None:
         count = await session.scalar(
             select(func.count())
             .select_from(NotificationInbox)
-            .where(NotificationInbox.consumer_name == CONSUMER_NAME, NotificationInbox.status == state)
+            .where(
+                NotificationInbox.consumer_name == CONSUMER_NAME, NotificationInbox.status == state
+            )
         )
         NOTIFICATION_FAILURE_BACKLOG.labels(state=state).set(count or 0)

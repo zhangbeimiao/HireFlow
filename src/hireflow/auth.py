@@ -94,7 +94,9 @@ def current_principal(
             role=UserRole(claims["role"]),
         )
     except (jwt.PyJWTError, KeyError, ValueError) as error:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid bearer token") from error
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid bearer token"
+        ) from error
 
 
 def require_roles(*allowed_roles: UserRole):

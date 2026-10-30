@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.auth import hash_password, verify_password
 from hireflow.db import set_tenant_context
-from hireflow.models import Application, Candidate, Job, Tenant, User
+from hireflow.models import Application, ApplicationAudit, Candidate, Job, OutboxEvent, Tenant, User
 from hireflow.pagination import PageCursor
 from hireflow.schemas import (
     ApplicationCreate,
@@ -144,7 +144,9 @@ async def update_job(
     return job
 
 
-async def create_candidate(session: AsyncSession, tenant_id: UUID, payload: CandidateCreate) -> Candidate:
+async def create_candidate(
+    session: AsyncSession, tenant_id: UUID, payload: CandidateCreate
+) -> Candidate:
     await require_tenant(session, tenant_id)
     candidate = Candidate(tenant_id=tenant_id, **payload.model_dump())
     session.add(candidate)
@@ -181,16 +183,43 @@ async def update_candidate(
 
 
 async def create_application(
-    session: AsyncSession, tenant_id: UUID, payload: ApplicationCreate
+    session: AsyncSession, tenant_id: UUID, actor_id: UUID, payload: ApplicationCreate
 ) -> Application:
     await require_tenant(session, tenant_id)
-    job = await session.scalar(select(Job).where(Job.id == payload.job_id, Job.tenant_id == tenant_id))
+    job = await session.scalar(
+        select(Job).where(Job.id == payload.job_id, Job.tenant_id == tenant_id)
+    )
     candidate = await session.scalar(
-        select(Candidate).where(Candidate.id == payload.candidate_id, Candidate.tenant_id == tenant_id)
+        select(Candidate).where(
+            Candidate.id == payload.candidate_id, Candidate.tenant_id == tenant_id
+        )
     )
     if job is None or candidate is None:
         raise InvalidReference("job_id and candidate_id must both belong to this tenant")
-    application = Application(tenant_id=tenant_id, **payload.model_dump())
+    application = Application(id=uuid4(), tenant_id=tenant_id, **payload.model_dump())
     session.add(application)
+    session.add(
+        ApplicationAudit(
+            tenant_id=tenant_id,
+            application_id=application.id,
+            from_stage=None,
+            to_stage="applied",
+            reason="application created",
+            actor_id=actor_id,
+        )
+    )
+    session.add(
+        OutboxEvent(
+            tenant_id=tenant_id,
+            aggregate_id=application.id,
+            event_type="application.created",
+            payload={
+                "application_id": str(application.id),
+                "job_id": str(application.job_id),
+                "candidate_id": str(application.candidate_id),
+                "stage": application.stage,
+            },
+        )
+    )
     await _commit(session)
     return application

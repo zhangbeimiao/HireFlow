@@ -28,7 +28,9 @@ def upgrade() -> None:
         sa.Column("status", sa.String(30), nullable=False, server_default="processing"),
         sa.Column("attempts", sa.Integer, nullable=False, server_default="0"),
         sa.Column("last_error", sa.Text),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.Column("processed_at", timestamp),
         sa.UniqueConstraint("consumer_name", "event_id", name="uq_notification_inbox_event"),
     )
@@ -44,10 +46,15 @@ def upgrade() -> None:
         sa.Column("recipient_id", uuid, nullable=False),
         sa.Column("title", sa.String(200), nullable=False),
         sa.Column("content", sa.Text, nullable=False),
-        sa.Column("created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
+        sa.Column(
+            "created_at", timestamp, nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")
+        ),
         sa.Column("read_at", timestamp),
         sa.UniqueConstraint(
-            "source_event_id", "recipient_type", "recipient_id", name="uq_notification_recipient_event"
+            "source_event_id",
+            "recipient_type",
+            "recipient_id",
+            name="uq_notification_recipient_event",
         ),
     )
     op.create_index("ix_notifications_tenant_id", "notifications", ["tenant_id"])
