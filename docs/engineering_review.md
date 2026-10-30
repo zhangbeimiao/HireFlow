@@ -11,6 +11,7 @@
 | 数据提交成功但消息未发送 | 业务事务内写 Outbox，Relay 异步投递 | 消除双写窗口，允许至少一次投递。 |
 | Relay 并发抢占或 Broker 中断 | Go Relay 原子 `SKIP LOCKED` 抢占、Publisher Confirm、租约与持久化退避 | PostgreSQL 并发测试和 RabbitMQ 中断恢复脚本覆盖。 |
 | 消息重复消费 | Inbox 和 Notification 的唯一键幂等 | Relay 重投不会重复创建站内信。 |
+| 招聘决策并发覆盖或跨表不一致 | Application/Offer 状态机、版本乐观锁、审计与同事务 Outbox | ATS 脚本验证非法/过期更新 `409`、评分卡锁定、Offer 接受自动录用。 |
 | 突发请求压垮认证与写接口 | Redis 固定窗口限流 | 限流脚本验证第 11 次失败登录返回 `429`。 |
 | 重复列表查询增加数据库负载 | 租户级 Redis Cache Aside，提交后失效、TTL 兜底 | 单测覆盖隔离/失效/降级，Locust 对比数据库回源与热缓存。 |
 
@@ -81,3 +82,10 @@
 - `/live`、`/ready`、`/metrics` 覆盖进程、PostgreSQL、RabbitMQ、积压、结果及 Confirm 延迟；Broker 连接关闭事件会主动更新 readiness。
 - 故障脚本验证 RabbitMQ 中断时 API 仍提交 Outbox、Relay 返回 `503`，事件保持未抢占 `pending` 或持久化退避；Broker 恢复后事件发布且 Consumer Inbox 只处理一次。
 - 性能矩阵使用独立 Compose 项目和临时数据卷，不访问主环境队列或数据；Go/Python 在批大小 10/50/100 下各运行 3 轮，每轮 500 条，并记录吞吐、Confirm P95/P99、CPU 与内存。批大小 100 时平均吞吐约为 `42.93/36.63 events/s`，平均内存约为 `7.02/44.36MiB`；批大小 10 时二者均受 1 秒轮询主导。完整口径见 `docs/relay_benchmark_results.md`，结果只用于回归，不包装为语言极限或生产容量。
+
+## 阶段九：ATS 招聘业务闭环
+
+- Application 使用显式状态机和版本号乐观锁，每次合法迁移追加审计并写 Outbox；非法跳转和旧版本更新返回 `409`。
+- 职位可配置有顺序、时长和评分维度的 Interview Round；面试可关联 Application 与 Round。
+- 面试官评分卡支持草稿与最终提交，提交后不可修改；Offer 使用独立状态机与审计，接受后在同一事务内将 Application 推进至 `hired`。
+- 新表全部启用并强制 PostgreSQL RLS；`ats_smoke.ps1` 覆盖主链路、评分卡锁定、审计、通知和跨租户不可见，`notification_idempotency_smoke.ps1` 额外验证 ATS 事件跨事务重复投递只产生一次副作用。

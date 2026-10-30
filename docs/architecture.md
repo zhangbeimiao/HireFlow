@@ -75,6 +75,21 @@ Every mutation sends the version read by the caller. The status update includes 
 `WHERE` condition, so a stale HR screen cannot overwrite a concurrent cancellation or confirmation.
 Each successful mutation also appends an audit record.
 
+The ATS workflow uses the same rule at a wider business boundary:
+
+```text
+Application: applied → screening → interview → offer → hired
+                       └───────────────→ rejected / withdrawn
+
+Offer:       draft → sent → accepted / declined
+               └────────→ withdrawn
+```
+
+Application and Offer transitions use compare-and-swap versions and append immutable audit rows. A
+Scorecard may be saved as a draft, but setting `submit=true` makes it immutable. Accepting an Offer
+locks the Offer, advances the Application to `hired`, appends both audit records, and emits Outbox
+events in one PostgreSQL transaction. All ATS tables are protected by the same forced RLS boundary.
+
 ## Why the outbox exists
 
 Creating an interview and delivering an email are two different systems. A database transaction cannot

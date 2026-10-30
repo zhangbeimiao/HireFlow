@@ -92,6 +92,19 @@ Content-Type: application/json
 | GET | `/v1/candidates?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 按创建时间与 ID 倒序游标分页查询当前租户候选人。 |
 | PATCH | `/v1/candidates/{candidate_id}` | Owner / Recruiter | 更新候选人并使当前租户候选人缓存失效。 |
 | POST | `/v1/applications` | Owner / Recruiter | 候选人与职位关联。 |
+| GET | `/v1/applications?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 游标分页查询当前租户申请。 |
+| POST | `/v1/applications/{application_id}/stage` | Owner / Recruiter / Hiring Manager | 按状态机推进申请；必须携带当前 `version`。 |
+| GET | `/v1/applications/{application_id}/audit` | Owner / Recruiter / Hiring Manager | 查询申请阶段审计。 |
+| POST | `/v1/jobs/{job_id}/rounds` | Owner / Recruiter / Hiring Manager | 配置职位的结构化面试轮次和评分维度。 |
+| GET | `/v1/jobs/{job_id}/rounds` | Owner / Recruiter / Hiring Manager | 查询职位面试轮次。 |
+| PUT | `/v1/interviews/{interview_id}/scorecard` | Interviewer / Hiring Manager | 保存或最终提交评分卡；提交后不可修改。 |
+| GET | `/v1/interviews/{interview_id}/scorecards` | Owner / Recruiter / Hiring Manager | 查询面试评分卡。 |
+| POST | `/v1/offers` | Owner / Recruiter | 为 `offer` 阶段申请起草 Offer。 |
+| GET | `/v1/offers` | Owner / Recruiter / Hiring Manager | 查询当前租户 Offer。 |
+| POST | `/v1/offers/{offer_id}/status` | Owner / Recruiter | 按状态机更新 Offer；必须携带当前 `version`。 |
+| GET | `/v1/offers/{offer_id}/audit` | Owner / Recruiter / Hiring Manager | 查询 Offer 状态审计。 |
+
+Application 状态机为 `applied → screening → interview → offer → hired`，中间阶段可转为 `rejected` 或 `withdrawn`。Offer 状态机为 `draft → sent → accepted/declined`，并允许在生效前撤回。接受 Offer 时，服务在同一 PostgreSQL 事务内将 Application 推进为 `hired`，追加双方审计并写入 Transactional Outbox。客户端版本落后或非法跳转统一返回 `409`。
 
 ### 列表缓存语义
 

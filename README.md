@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zhangbeimiao/HireFlow/actions/workflows/ci.yml/badge.svg)](https://github.com/zhangbeimiao/HireFlow/actions/workflows/ci.yml)
 
-HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时间、并发抢占同一面试时段等高风险问题。项目将排期一致性、权限隔离和异步通知拆为可验证的后端闭环。
+HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶段、结构化面试、评分卡、Offer 与通知闭环。项目重点解决并发抢占同一面试时段、招聘决策被并发覆盖、跨租户数据泄露和异步消息丢失等高风险问题。
 
 ## 技术栈
 
@@ -13,10 +13,11 @@ HireFlow 面向中小企业招聘场景，解决候选人与面试官协调时�
 - **多租户与权限**：JWT 签发 `tenant_id` 与角色；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，跨租户资源返回 `404`；API 采用受限数据库账号，PostgreSQL RLS 作为数据隔离最终防线。
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
+- **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
 - **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
 - **幂等通知**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重，支持重试队列、DLQ 和 Owner 人工重放。
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效并设置 TTL。
-- **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、新建职位、录入候选人和安排面试；排期冲突在页面直观呈现为 `409 Conflict`，Swagger 保留为开发者接口文档。
+- **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
 ## 架构
 
@@ -67,6 +68,8 @@ python -m pytest -q
 
 .\scripts\demo.ps1
 .\scripts\workbench_smoke.ps1
+.\scripts\ats_smoke.ps1
+.\scripts\notification_idempotency_smoke.ps1
 .\scripts\stack_smoke.ps1
 .\scripts\security_smoke.ps1
 .\scripts\rate_limit_smoke.ps1
@@ -94,6 +97,8 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | --- | --- |
 | `demo.ps1` | 创建招聘流程、排期、确认状态和 4 条站内通知。 |
 | `workbench_smoke.ps1` | 验证工作台依赖的列表、可用时段推荐、dashboard 聚合与排期 `201/409`。 |
+| `ats_smoke.ps1` | 走通申请阶段、面试轮次、评分卡锁定、Offer 接受后自动录用、审计、通知与跨租户隔离。 |
+| `notification_idempotency_smoke.ps1` | 模拟同一 ATS 事件跨事务重复投递两次，验证 Inbox 与业务通知均只有一条。 |
 | `stack_smoke.ps1` | 检查 Compose 服务、兼容健康接口、进程 liveness 与 PostgreSQL/Redis readiness。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
