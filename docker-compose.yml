@@ -105,6 +105,7 @@ services:
   notification-consumer:
     build: .
     command: python -m hireflow.consumer
+    restart: on-failure
     environment:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/

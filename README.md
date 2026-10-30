@@ -95,7 +95,7 @@ python -m pytest -q
 | `concurrency_smoke.ps1` | 两位候选人并发抢唯一时段：恰好一个 `201`、一个 `409`。 |
 | `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
 | `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |
-| `go_relay_recovery_smoke.ps1` | 主动中断 RabbitMQ，验证 Go Relay readiness、持久化退避、自动重连与 Inbox 单次副作用。 |
+| `go_relay_recovery_smoke.ps1` | 主动中断 RabbitMQ，验证 Go Relay readiness、Outbox 可恢复状态、自动重连与 Inbox 单次副作用。 |
 | `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
 | `cache_smoke.ps1` | 验证职位/候选人列表 MISS→HIT、创建/更新后失效、租户级 Key、TTL 与缓存指标。 |
 | `pagination_smoke.ps1` | 验证职位/候选人 Keyset 分页 `20 + 3` 条无重复遗漏、非法游标 `422` 及首页缓存策略。 |

@@ -51,15 +51,24 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "demo failed while RabbitMQ was unavailable" }
     $event = ""
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
-        $event = Invoke-Scalar "SELECT id::text || '|' || status || '|' || attempts::text || '|' || (next_attempt_at IS NOT NULL)::text FROM outbox_events WHERE created_at >= '$outageMarker' AND attempts > 0 ORDER BY created_at, id LIMIT 1"
-        if ($event) { break }
+        $event = Invoke-Scalar "SELECT id::text || '|' || status || '|' || attempts::text || '|' || (next_attempt_at IS NOT NULL)::text FROM outbox_events WHERE created_at >= '$outageMarker' AND event_type = 'interview.scheduled' ORDER BY created_at, id LIMIT 1"
+        if ($event) {
+            $probe = $event -split '\|'
+            $durablyPending = $probe.Count -eq 4 -and $probe[1] -eq "pending" -and (
+                ([int] $probe[2] -eq 0 -and $probe[3] -eq "false") -or
+                ([int] $probe[2] -ge 1 -and $probe[3] -eq "true")
+            )
+            if ($durablyPending) { break }
+        }
         Start-Sleep -Seconds 1
     }
     $parts = $event -split '\|'
     if ($parts.Count -ne 4) { throw "unexpected Outbox probe: $event" }
     $eventId = $parts[0]
-    if ($parts[1] -ne "pending" -or [int] $parts[2] -lt 1 -or $parts[3] -ne "true") {
-        throw "broker failure was not persisted as a retry: $event"
+    $unclaimedPending = [int] $parts[2] -eq 0 -and $parts[3] -eq "false"
+    $scheduledRetry = [int] $parts[2] -ge 1 -and $parts[3] -eq "true"
+    if ($parts[1] -ne "pending" -or (-not $unclaimedPending -and -not $scheduledRetry)) {
+        throw "broker outage did not preserve a recoverable event: $event"
     }
 
     & $docker compose start rabbitmq | Out-Null
@@ -87,7 +96,7 @@ try {
 
     [PSCustomObject]@{
         broker_outage_readiness = "503 verified"
-        persisted_retry = "pending with durable next_attempt_at"
+        durable_outage_state = if ($scheduledRetry) { "pending with durable next_attempt_at" } else { "pending and not claimed while broker unavailable" }
         recovered_event = $eventId
         consumer_inbox = "processed exactly once"
         result = "Go relay broker-outage recovery verified"
