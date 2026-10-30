@@ -173,6 +173,10 @@ jobs:
         shell: pwsh
         run: ./scripts/ats_smoke.ps1
 
+      - name: Verify duplicate ATS notification delivery is idempotent
+        shell: pwsh
+        run: ./scripts/notification_idempotency_smoke.ps1
+
       - name: Verify authentication, RBAC, and tenant isolation
         shell: pwsh
         run: ./scripts/security_smoke.ps1
