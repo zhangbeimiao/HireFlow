@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hireflow
+      POSTGRES_USER: hireflow
+      POSTGRES_PASSWORD: benchmark_only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hireflow -d hireflow"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: hireflow
+      RABBITMQ_DEFAULT_PASS: benchmark_only
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  migrate:
+    build: .
+    command: alembic upgrade head
+    environment:
+      HIREFLOW_MIGRATION_DATABASE_URL: postgresql+psycopg://hireflow:benchmark_only@postgres:5432/hireflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+  go-relay:
+    profiles: ["go"]
+    build:
+      context: ./services/outbox-relay-go
+    environment:
+      HIREFLOW_DATABASE_URL: postgresql://hireflow:benchmark_only@postgres:5432/hireflow
+      HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
+      HIREFLOW_HTTP_ADDRESS: :9101
+      HIREFLOW_OUTBOX_BATCH_SIZE: 100
+      HIREFLOW_OUTBOX_POLL_INTERVAL: 1s
+    ports:
+      - "9201:9101"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+  python-relay:
+    profiles: ["python"]
+    build: .
+    command: python -m hireflow.worker
+    environment:
+      HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:benchmark_only@postgres:5432/hireflow
+      HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
+      HIREFLOW_METRICS_PORT: 9101
+    ports:
+      - "9203:9101"
+    restart: on-failure
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy

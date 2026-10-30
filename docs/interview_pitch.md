@@ -6,7 +6,7 @@ HireFlow 是我独立实现的多租户招聘面试调度后端。它解决的�
 
 我使用 FastAPI 和 PostgreSQL 实现主业务，时间统一以 UTC 保存、用半开区间计算重叠；应用层先做冲突预检以返回友好的错误，但最终通过 PostgreSQL 的 GiST 排他约束保证多实例并发下只有一个事务提交。并发脚本实际验证了两个请求抢唯一时段时得到一个 201 和一个 409。
 
-通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Relay 再投递 RabbitMQ。消费者用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志，并分别暴露 API、Relay、Consumer 的 Prometheus 指标，以 Docker Compose 一键运行。
+通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Go Relay 使用 pgx 原子抢占、RabbitMQ Publisher Confirm、租约和指数退避完成可靠投递。Python Consumer 用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志，并分别暴露 API、Relay、Consumer 的 Prometheus 指标，以 Docker Compose 一键运行。
 
 ## 重点追问
 
@@ -25,6 +25,14 @@ Redis 锁可减少冲突，但 Redis 不是排期事实来源，也无法替代�
 ### Outbox 如何处理重复消息？
 
 Relay 可能在“已发布、未标记 published”时崩溃，因此语义是至少一次。消费者将 `(consumer_name, event_id)` 持久化到 Inbox，并与通知副作用在同一事务内提交；重投后发现事件已处理便直接确认。
+
+### 为什么只用 Go 重写 Relay？
+
+FastAPI 主业务已经稳定，招聘流程、RLS 和排期约束并不会因为换语言更可靠；Relay 则边界窄、I/O 并发明显，适合用 Go 展示 goroutine、context、pgx 连接池、优雅停机与静态二进制部署。这样得到真实的多语言架构收益，同时避免为了技术栈制造大规模重写风险。
+
+### Publisher Confirm 后为什么还会重复？
+
+Broker ACK 与 PostgreSQL 状态更新不是一个原子事务。如果消息已确认而 Relay 在更新 `published` 前崩溃，租约到期后会再次投递。项目明确承诺 At-least-once，并用稳定 `message_id` 与 Inbox 唯一键保证重复消息不产生重复通知。
 
 ### 目前有哪些边界？
 

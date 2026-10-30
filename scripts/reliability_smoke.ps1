@@ -8,7 +8,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     $docker = $candidate
 }
 
-# The worker has the cross-tenant service credential and runs against the same PostgreSQL data as
-# the relay/consumer. A real interview is required as the message aggregate.
-& $docker compose exec -T worker python -m hireflow.reliability_smoke
+# The notification consumer shares the cross-tenant service credential and Python package with the
+# former relay. Running the database-focused smoke here keeps the default stack on the Go relay only.
+& $docker compose exec -T notification-consumer python -m hireflow.reliability_smoke
 if ($LASTEXITCODE -ne 0) { throw "reliability smoke failed with exit code $LASTEXITCODE" }

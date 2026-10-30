@@ -50,6 +50,10 @@ OUTBOX_RELAY_EVENTS = Counter(
     "Outbox relay publish attempts by outcome.",
     ["outcome"],
 )
+OUTBOX_PUBLISH_DURATION = Histogram(
+    "hireflow_outbox_publish_duration_seconds",
+    "RabbitMQ publish and confirm latency.",
+)
 OUTBOX_BACKLOG = Gauge(
     "hireflow_outbox_backlog",
     "Persisted Outbox events awaiting or currently undergoing publication.",

@@ -12,3 +12,5 @@ hireflow.db
 .vscode/
 coverage.xml
 htmlcov/
+services/outbox-relay-go/outbox-relay
+services/outbox-relay-go/*.test

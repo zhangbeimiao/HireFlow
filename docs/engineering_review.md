@@ -9,6 +9,7 @@
 | 同一面试官重复排期 | PostgreSQL GiST 排他约束最终裁决 | 并发脚本稳定验证一个 `201`、一个 `409`。 |
 | 跨租户数据泄露 | JWT 内携带 `tenant_id`，所有资源查询限定当前租户 | 安全脚本验证跨租户查询 `404`。 |
 | 数据提交成功但消息未发送 | 业务事务内写 Outbox，Relay 异步投递 | 消除双写窗口，允许至少一次投递。 |
+| Relay 并发抢占或 Broker 中断 | Go Relay 原子 `SKIP LOCKED` 抢占、Publisher Confirm、租约与持久化退避 | PostgreSQL 并发测试和 RabbitMQ 中断恢复脚本覆盖。 |
 | 消息重复消费 | Inbox 和 Notification 的唯一键幂等 | Relay 重投不会重复创建站内信。 |
 | 突发请求压垮认证与写接口 | Redis 固定窗口限流 | 限流脚本验证第 11 次失败登录返回 `429`。 |
 | 重复列表查询增加数据库负载 | 租户级 Redis Cache Aside，提交后失效、TTL 兜底 | 单测覆盖隔离/失效/降级，Locust 对比数据库回源与热缓存。 |
@@ -42,7 +43,7 @@
 
 ## 阶段三：可靠消息与故障恢复
 
-- `scripts/reliability_smoke.ps1` 在 Worker 容器内对真实 PostgreSQL 执行验收：同一事件重复消费只生成候选人和面试官各一条通知；这覆盖“提交成功后、ack 之前消费者宕机”导致的至少一次重投。
+- `scripts/reliability_smoke.ps1` 在 Notification Consumer 容器内对真实 PostgreSQL 执行验收：同一事件重复消费只生成候选人和面试官各一条通知；这覆盖“提交成功后、ack 之前消费者宕机”导致的至少一次重投。
 - 对毒消息保留 `notification_inbox` 中的失败证据，并验证 `failed → replay_requested → replay_queued → replay_requested` 的人工重放状态机；实际 Consumer 仍负责将失败消息按 5 秒重试队列转发至 DLQ。
 - 对 Relay 故障验证 `publishing → pending(next_attempt_at)`，重试时间由指数退避持久化在 Outbox，而非仅存在进程内存。
 
@@ -61,7 +62,7 @@
 
 ## 阶段六：跨进程可观测性
 
-- API、Outbox Relay、Notification Consumer 分别暴露 Prometheus 端点，避免把多进程指标错误聚合在单个 Python Registry 中。
+- API、Go Outbox Relay、Python Notification Consumer 分别暴露 Prometheus 端点，避免把跨语言、跨进程指标错误聚合在同一个进程 Registry 中。
 - API 记录排期冲突和数据库连接池 size/checked-in/checked-out/overflow；Relay 记录发布结果与 PostgreSQL Outbox pending/publishing/retry 积压；Consumer 记录处理、重试、DLQ、requeue 与失败/重放积压。
 - `observability_smoke.ps1` 同时抓取三个端点并断言关键指标存在；业务积压 Gauge 由持久化状态刷新，进程重启后仍可恢复。
 
@@ -71,3 +72,12 @@
 - PostgreSQL 是同步事务关键依赖，不可用返回 `503 not_ready`；Redis 的缓存与限流允许 fail-open，因此不可用时返回 `200 degraded`。
 - RabbitMQ 由 Transactional Outbox 与同步 API 解耦，不纳入 API readiness；故障通过 Relay 重试、积压指标和独立进程状态暴露。
 - 探针仅返回规范化依赖状态，不泄露连接地址、凭据或异常文本；Compose API healthcheck 使用 readiness，验收脚本同时覆盖兼容接口、liveness 与 readiness。
+
+## 阶段八：Go Outbox Relay
+
+- 保留 FastAPI、RLS、排期和 Python Consumer，只将可靠消息 Relay 独立为 Go 服务，避免为了技术栈重写稳定业务。
+- pgx 通过单条 CTE 原子完成 `SKIP LOCKED` 抢占、attempts 递增和租约设置；真实 PostgreSQL 并发测试验证 20 条事件被两个 worker 完整且不重复地领取。
+- RabbitMQ Publisher Confirm 是标记 `published` 的前置条件；失败回写指数退避，进程崩溃由租约恢复，ACK 后数据库更新失败仍可能重投，因此继续使用 Inbox 幂等实现 At-least-once。
+- `/live`、`/ready`、`/metrics` 覆盖进程、PostgreSQL、RabbitMQ、积压、结果及 Confirm 延迟；Broker 连接关闭事件会主动更新 readiness。
+- 故障脚本验证 RabbitMQ 中断时 API 仍提交 Outbox、Relay 返回 `503` 并持久化 retry，Broker 恢复后事件发布且 Consumer Inbox 只处理一次。
+- 性能脚本使用独立 Compose 项目和临时数据卷，不访问主环境队列或数据；同机 1000 条快照中 Go/Python 吞吐约为 `49.12/43.56 events/s`，内存约为 `7.7/45.4MiB`。固定 1 秒轮询占据主要耗时，结果只用于回归，不包装为语言极限或生产容量。

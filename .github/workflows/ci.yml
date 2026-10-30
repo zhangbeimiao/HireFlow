@@ -32,6 +32,18 @@ jobs:
       - name: Unit tests
         run: python -m pytest -q
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: services/outbox-relay-go/go.sum
+
+      - name: Vet and test Go Outbox Relay
+        working-directory: services/outbox-relay-go
+        run: |
+          go vet ./...
+          go test -race ./...
+
   integration:
     name: Docker integration checks
     runs-on: ubuntu-latest
@@ -51,6 +63,21 @@ jobs:
 
       - name: Start full application stack
         run: docker compose up --build -d --wait --wait-timeout 90
+
+      - name: Set up Go integration runner
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache-dependency-path: services/outbox-relay-go/go.sum
+
+      - name: Verify concurrent Outbox claims against PostgreSQL
+        working-directory: services/outbox-relay-go
+        env:
+          HIREFLOW_TEST_DATABASE_URL: postgresql://hireflow:hireflow_dev_only@localhost:5432/hireflow
+        run: |
+          docker compose -f ../../docker-compose.yml stop outbox-relay
+          trap 'docker compose -f ../../docker-compose.yml start outbox-relay' EXIT
+          go test -race -run TestConcurrentClaimUsesSkipLockedWithoutDuplicates ./internal/outbox
 
       - name: Verify Compose service readiness
         shell: pwsh
@@ -75,6 +102,10 @@ jobs:
       - name: Verify reliable message persistence and manual replay
         shell: pwsh
         run: ./scripts/reliability_smoke.ps1
+
+      - name: Verify Go relay broker-outage recovery
+        shell: pwsh
+        run: ./scripts/go_relay_recovery_smoke.ps1
 
       - name: Load test the single-slot concurrency boundary
         shell: pwsh

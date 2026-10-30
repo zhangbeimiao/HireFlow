@@ -63,15 +63,40 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-  worker:
+  outbox-relay:
+    build:
+      context: ./services/outbox-relay-go
+    environment:
+      HIREFLOW_DATABASE_URL: postgresql://hireflow:hireflow_dev_only@postgres:5432/hireflow
+      HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
+      HIREFLOW_HTTP_ADDRESS: :9101
+      HIREFLOW_OUTBOX_BATCH_SIZE: 100
+      HIREFLOW_OUTBOX_POLL_INTERVAL: 1s
+      HIREFLOW_OUTBOX_LEASE_DURATION: 60s
+      HIREFLOW_PUBLISH_TIMEOUT: 5s
+    ports:
+      - "9101:9101"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9101/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+  worker-python:
+    profiles: ["python-relay"]
     build: .
     command: python -m hireflow.worker
     environment:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:hireflow_dev_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@rabbitmq/
-      HIREFLOW_METRICS_PORT: 9101
+      HIREFLOW_METRICS_PORT: 9103
     ports:
-      - "9101:9101"
+      - "9103:9103"
     depends_on:
       migrate:
         condition: service_completed_successfully

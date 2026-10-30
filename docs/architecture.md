@@ -17,8 +17,16 @@ Scheduling service
   ├─ interviewer availability
   └─ active interviews subtracted before matching
 
-Outbox Relay ──> RabbitMQ ──> Notification Consumer ──> PostgreSQL notifications
+Go Outbox Relay ──> RabbitMQ ──> Python Notification Consumer ──> PostgreSQL notifications
 ```
+
+## Go Outbox Relay
+
+Relay 是本项目刻意划出的 Go 服务边界：它没有招聘领域 API，只负责高并发抢占、可靠发布和故障恢复。单条 PostgreSQL CTE 使用 `FOR UPDATE SKIP LOCKED` 选择可投递或租约过期事件，并原子更新为 `publishing`，因此多个实例不会正常抢到同一行。
+
+每条消息以 Outbox ID 作为 `message_id`，使用持久化 Delivery Mode；收到 RabbitMQ Publisher Confirm 后才将数据库状态更新为 `published`。如果 Broker 已确认但数据库更新失败，事件会在租约过期后重投，所以系统明确保持 At-least-once，并由 Python Consumer 的 Inbox 唯一键消除重复副作用。发布失败则回写 `pending + next_attempt_at`，按指数退避重试；连接关闭会立即让 Relay readiness 变为 `503`，重连后继续处理积压。
+
+SIGTERM 到来后 Relay 停止新抢占，批次内尚未发布的事件恢复为可重试状态。Python Relay 仍位于 `python-relay` Compose profile，作为回退与对照实现，默认栈只运行 Go Relay。
 
 ## Health boundaries
 
@@ -32,7 +40,7 @@ Outbox Relay ──> RabbitMQ ──> Notification Consumer ──> PostgreSQL n
 三个独立进程分别暴露 Prometheus 指标，避免假装不同进程共享 Python 内存：
 
 - API `:8000/metrics`：HTTP 吞吐/延迟、在途请求、缓存、排期冲突和 SQLAlchemy 连接池状态。
-- Outbox Relay `:9101/metrics`：发布成功/重试 Counter，以及 pending、publishing、retry 持久化积压 Gauge。
+- Go Outbox Relay `:9101/metrics`：抢占量、发布结果、Publisher Confirm 延迟 Histogram，以及 pending、publishing、retry 持久化积压 Gauge。
 - Notification Consumer `:9102/metrics`：processed、retry、DLQ、requeue 结果，以及 failed/replay 状态积压。
 
 Outbox 与通知积压指标直接根据 PostgreSQL 持久化状态刷新；进程重启不会让失败证据消失。当前阶段只暴露采集端点，告警阈值需要结合生产流量基线后配置。

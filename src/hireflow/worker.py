@@ -3,13 +3,14 @@
 import asyncio
 import json
 import os
+from time import perf_counter
 
 import aio_pika
 from prometheus_client import start_http_server
 
 from hireflow.broker import EVENT_QUEUE, declare_event_topology
 from hireflow.db import SessionLocal
-from hireflow.observability import OUTBOX_RELAY_EVENTS
+from hireflow.observability import OUTBOX_PUBLISH_DURATION, OUTBOX_RELAY_EVENTS
 from hireflow.outbox import (
     claim_pending_events,
     mark_published,
@@ -23,6 +24,7 @@ async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
         events = await claim_pending_events(session)
 
     for event in events:
+        started_at = perf_counter()
         try:
             body = json.dumps(
                 {
@@ -50,6 +52,8 @@ async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
             OUTBOX_RELAY_EVENTS.labels(outcome="published").inc()
             async with SessionLocal() as session:
                 await mark_published(session, event.id)
+        finally:
+            OUTBOX_PUBLISH_DURATION.observe(perf_counter() - started_at)
     async with SessionLocal() as session:
         await refresh_outbox_metrics(session)
     return len(events)
