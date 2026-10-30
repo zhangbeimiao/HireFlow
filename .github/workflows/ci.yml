@@ -89,7 +89,7 @@ jobs:
       - name: Scan Git history for committed secrets
         run: |
           docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.30.1 \
-            git --source /repo --redact --no-banner --exit-code 1
+            git /repo --redact --no-banner --exit-code 1
 
       - name: Scan source and dependency manifests
         run: |
@@ -147,8 +147,8 @@ jobs:
       - name: Verify Go Relay broker failures, leases, and concurrent claims
         working-directory: services/outbox-relay-go
         env:
-          HIREFLOW_TEST_DATABASE_URL: postgresql://hireflow:hireflow_dev_only@localhost:5432/hireflow
-          HIREFLOW_TEST_RABBITMQ_URL: amqp://hireflow:hireflow_dev_only@localhost:5672/
+          HIREFLOW_TEST_DATABASE_URL: postgresql://hireflow:hireflow_ci_only@localhost:5432/hireflow
+          HIREFLOW_TEST_RABBITMQ_URL: amqp://hireflow:hireflow_ci_only@localhost:5672/
         run: |
           docker compose -f ../../docker-compose.yml stop outbox-relay
           trap 'docker compose -f ../../docker-compose.yml start outbox-relay' EXIT
