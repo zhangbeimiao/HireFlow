@@ -82,6 +82,8 @@ python -m pytest -q
 .\scripts\cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 10
 # 在独立 Compose 项目中对比 Go/Python Relay，不访问主环境数据
 .\scripts\relay_performance.ps1 -Events 500
+# 3 轮 × 批大小 10/50/100，采集吞吐、P95/P99、CPU 和内存
+.\scripts\relay_performance_matrix.ps1 -Events 500 -Runs 3 -BatchSizes 10,50,100
 ```
 
 | 脚本 | 验证结果 |
@@ -102,12 +104,24 @@ python -m pytest -q
 | `explain_analyze.ps1` | 事务内生成每表 5000 条数据，验证游标查询命中租户复合索引并回滚测试数据。 |
 | `cache_performance.ps1` | Locust 对比 `Cache-Control: no-cache` 数据库回源与热缓存，输出 RPS、P95、P99。 |
 | `relay_performance.ps1` | 在隔离 PostgreSQL/RabbitMQ 中以同批大小和轮询周期对比 Go/Python Relay 吞吐、Confirm P95/P99 与内存。 |
+| `relay_performance_matrix.ps1` | Go/Python 各跑 3～5 轮和批大小 10/50/100，输出平均吞吐、P95/P99、CPU、内存及 Markdown 报告。 |
 
 一次本机快照（10 用户、每类 20 条数据、每阶段 5 秒）中，热缓存相对数据库回源的吞吐由约 `208 RPS` 提升到 `295 RPS`，P95 从 `44ms` 降至 `28ms`，P99 从 `100ms` 降至 `48ms`。该数据仅用于同机型回归对比，不代表生产容量。
 
 分页以排序时间和 `id` 组成稳定游标，避免深分页 `OFFSET` 随偏移量增长而扫描和丢页。在每类 5000 条事务内样本上，职位、候选人、面试和通知查询均选择目标复合索引；完整计划见 [查询性能记录](docs/query_performance.md)，数值仅用于证明执行计划与回归对比。
 
-一次隔离基准快照（同机、1000 条事件、批大小 100、轮询 1 秒）中，Go/Python Relay 吞吐约为 `49.12 / 43.56 events/s`，Prometheus Confirm 直方图近似 P95/P99 分别为 `10/25ms` 与 `25/25ms`，容器内存约 `7.7MiB / 45.4MiB`。结果只用于同环境回归，不外推为生产容量；轮询间隔占据主要耗时，因此不能据此宣称语言层面的极限吞吐。
+Go/Python Relay 在 Windows Docker Desktop、14 逻辑 CPU 上各运行 3 轮，每轮 500 条事件，结果如下；完整环境和口径见 [Relay 性能报告](docs/relay_benchmark_results.md)。
+
+| 实现 | 批大小 | 平均吞吐 (events/s) | 平均 P95/P99 (ms) | 平均 CPU | 平均内存 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Go | 10 | 8.45 | 25 / 25 | 0.47% | 6.46 MiB |
+| Python | 10 | 8.27 | 25 / 25 | 2.28% | 43.45 MiB |
+| Go | 50 | 30.71 | 10 / 20 | 1.26% | 7.31 MiB |
+| Python | 50 | 28.29 | 25 / 25 | 5.65% | 44.05 MiB |
+| Go | 100 | 42.93 | 10 / 15 | 1.58% | 7.02 MiB |
+| Python | 100 | 36.63 | 25 / 25 | 9.66% | 44.36 MiB |
+
+批大小 10 时两者都受 1 秒轮询主导；批大小提高后 Go 的吞吐、尾延迟和资源占用优势才更明显。数据仅用于同机回归，不外推为生产容量或语言极限。
 
 ## 关键一致性约束
 

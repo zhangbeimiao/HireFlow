@@ -19,9 +19,9 @@ from hireflow.outbox import (
 )
 
 
-async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
+async def relay_once(channel: aio_pika.abc.AbstractChannel, batch_size: int = 100) -> int:
     async with SessionLocal() as session:
-        events = await claim_pending_events(session)
+        events = await claim_pending_events(session, limit=batch_size)
 
     for event in events:
         started_at = perf_counter()
@@ -61,6 +61,9 @@ async def relay_once(channel: aio_pika.abc.AbstractChannel) -> int:
 
 async def run() -> None:
     start_http_server(int(os.getenv("HIREFLOW_METRICS_PORT", "9101")))
+    batch_size = int(os.getenv("HIREFLOW_OUTBOX_BATCH_SIZE", "100"))
+    if batch_size < 1:
+        raise ValueError("HIREFLOW_OUTBOX_BATCH_SIZE must be positive")
     rabbitmq_url = os.getenv(
         "HIREFLOW_RABBITMQ_URL", "amqp://hireflow:hireflow_dev_only@localhost/"
     )
@@ -69,7 +72,7 @@ async def run() -> None:
         channel = await connection.channel()
         await declare_event_topology(channel)
         while True:
-            await relay_once(channel)
+            await relay_once(channel, batch_size=batch_size)
             await asyncio.sleep(1)
 
 

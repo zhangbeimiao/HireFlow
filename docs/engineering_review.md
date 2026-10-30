@@ -80,4 +80,4 @@
 - RabbitMQ Publisher Confirm 是标记 `published` 的前置条件；失败回写指数退避，进程崩溃由租约恢复，ACK 后数据库更新失败仍可能重投，因此继续使用 Inbox 幂等实现 At-least-once。
 - `/live`、`/ready`、`/metrics` 覆盖进程、PostgreSQL、RabbitMQ、积压、结果及 Confirm 延迟；Broker 连接关闭事件会主动更新 readiness。
 - 故障脚本验证 RabbitMQ 中断时 API 仍提交 Outbox、Relay 返回 `503`，事件保持未抢占 `pending` 或持久化退避；Broker 恢复后事件发布且 Consumer Inbox 只处理一次。
-- 性能脚本使用独立 Compose 项目和临时数据卷，不访问主环境队列或数据；同机 1000 条快照中 Go/Python 吞吐约为 `49.12/43.56 events/s`，内存约为 `7.7/45.4MiB`。固定 1 秒轮询占据主要耗时，结果只用于回归，不包装为语言极限或生产容量。
+- 性能矩阵使用独立 Compose 项目和临时数据卷，不访问主环境队列或数据；Go/Python 在批大小 10/50/100 下各运行 3 轮，每轮 500 条，并记录吞吐、Confirm P95/P99、CPU 与内存。批大小 100 时平均吞吐约为 `42.93/36.63 events/s`，平均内存约为 `7.02/44.36MiB`；批大小 10 时二者均受 1 秒轮询主导。完整口径见 `docs/relay_benchmark_results.md`，结果只用于回归，不包装为语言极限或生产容量。

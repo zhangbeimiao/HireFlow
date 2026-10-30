@@ -36,7 +36,7 @@ services:
       HIREFLOW_DATABASE_URL: postgresql://hireflow:benchmark_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
       HIREFLOW_HTTP_ADDRESS: :9101
-      HIREFLOW_OUTBOX_BATCH_SIZE: 100
+      HIREFLOW_OUTBOX_BATCH_SIZE: ${HIREFLOW_BENCHMARK_BATCH_SIZE:-100}
       HIREFLOW_OUTBOX_POLL_INTERVAL: 1s
     ports:
       - "9201:9101"
@@ -53,6 +53,7 @@ services:
       HIREFLOW_DATABASE_URL: postgresql+asyncpg://hireflow:benchmark_only@postgres:5432/hireflow
       HIREFLOW_RABBITMQ_URL: amqp://hireflow:benchmark_only@rabbitmq/
       HIREFLOW_METRICS_PORT: 9101
+      HIREFLOW_OUTBOX_BATCH_SIZE: ${HIREFLOW_BENCHMARK_BATCH_SIZE:-100}
     ports:
       - "9203:9101"
     restart: on-failure
