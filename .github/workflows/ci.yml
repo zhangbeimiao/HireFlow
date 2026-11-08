@@ -198,13 +198,9 @@ jobs:
         shell: pwsh
         run: ./scripts/concurrency_smoke.ps1
 
-      - name: Verify reliable message persistence and manual replay
+      - name: Verify dependency outages and end-to-end recovery
         shell: pwsh
-        run: ./scripts/reliability_smoke.ps1
-
-      - name: Verify Go relay broker-outage recovery
-        shell: pwsh
-        run: ./scripts/go_relay_recovery_smoke.ps1
+        run: ./scripts/failure_drill.ps1
 
       - name: Load test the single-slot concurrency boundary
         shell: pwsh
