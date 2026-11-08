@@ -177,6 +177,11 @@ jobs:
         shell: pwsh
         run: ./scripts/ats_smoke.ps1
 
+      - name: Verify ATS public API contracts with pytest
+        env:
+          HIREFLOW_INTEGRATION_BASE_URL: http://127.0.0.1:8000
+        run: python -m pytest -q -m integration tests/integration
+
       - name: Verify duplicate ATS notification delivery is idempotent
         shell: pwsh
         run: ./scripts/notification_idempotency_smoke.ps1
