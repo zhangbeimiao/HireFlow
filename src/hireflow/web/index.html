@@ -46,7 +46,7 @@
           <article class="metric-card"><span class="metric-icon cyan">▱</span><div><p>开放职位</p><strong id="open-jobs">—</strong><small>待团队连接</small></div></article>
           <article class="metric-card"><span class="metric-icon violet">♙</span><div><p>候选人</p><strong id="candidates">—</strong><small>全流程累计</small></div></article>
           <article class="metric-card"><span class="metric-icon amber">◫</span><div><p>待进行面试</p><strong id="upcoming">—</strong><small>从当前时刻起</small></div></article>
-          <article class="metric-card"><span class="metric-icon rose">◌</span><div><p>未读通知</p><strong id="notifications">—</strong><small>事件驱动投递</small></div></article>
+          <article class="metric-card"><span class="metric-icon rose">◌</span><div><p>未读通知</p><strong id="unread-notifications">—</strong><small>事件驱动投递</small></div></article>
         </section>
 
         <section class="record-grid">
@@ -59,9 +59,19 @@
           <article class="panel record-panel"><div class="panel-head"><div><p class="eyebrow">OFFER MANAGEMENT</p><h3>Offer</h3></div><button class="mini-action" data-operation="offer">＋ 起草</button></div><div id="offer-list" class="record-list empty-state"><p>推进申请至 offer 阶段后可起草 Offer</p></div></article>
         </section>
 
+        <section class="panel ats-detail-panel hidden" id="ats-detail" aria-live="polite">
+          <div class="panel-head"><div><p class="eyebrow" id="detail-kicker">ATS DETAIL</p><h3 id="detail-title">招聘流程详情</h3></div><button class="mini-action" id="detail-close" type="button">关闭</button></div>
+          <div class="detail-grid"><div id="detail-summary" class="detail-summary"></div><div><p class="detail-section-title">审计时间线</p><div id="audit-timeline" class="audit-timeline"></div></div></div>
+        </section>
+
         <section class="content-grid">
           <article class="panel schedule-panel" id="schedule"><div class="panel-head"><div><p class="eyebrow">UP NEXT</p><h3>即将进行的面试</h3></div><div class="panel-actions"><button class="mini-action" data-operation="scorecard">填写评分卡</button><span class="live-dot">实时</span></div></div><div id="interview-list" class="empty-state"><span>◫</span><p>连接团队后显示近期面试</p></div></article>
           <article class="panel reliability-panel"><div class="panel-head"><div><p class="eyebrow">SYSTEM STATUS</p><h3>可靠性护栏</h3></div><span class="status-ok">● 运行中</span></div><div class="guard"><span class="guard-number">01</span><div><strong>排期冲突保护</strong><p>PostgreSQL 排他约束作为最终裁决。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">02</span><div><strong>事件通知闭环</strong><p>Outbox、重试队列与幂等消费。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">03</span><div><strong>多租户访问控制</strong><p>JWT 签名声明与 RBAC 权限校验。</p></div><span class="guard-check">✓</span></div><a class="panel-link" href="/metrics" target="_blank">打开 Prometheus 指标 ↗</a></article>
+        </section>
+
+        <section class="panel notification-panel" id="notifications">
+          <div class="panel-head"><div><p class="eyebrow">EVENT DELIVERY</p><h3>通知中心</h3></div><span class="live-dot">异步投递</span></div>
+          <div id="notification-list" class="record-list empty-state"><p>连接团队后显示站内通知</p></div>
         </section>
       </main>
     </div>

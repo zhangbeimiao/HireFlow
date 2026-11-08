@@ -1,6 +1,6 @@
 const operationDialog = document.querySelector("#operation-dialog");
 const operationError = document.querySelector("#operation-error");
-const operationState = { jobs: [], candidates: [], users: [], applications: [], offers: [], interviews: [], rounds: [] };
+const operationState = { jobs: [], candidates: [], users: [], applications: [], offers: [], interviews: [], notifications: [], rounds: [] };
 
 const applicationTransitions = {
   applied: ["screening", "rejected", "withdrawn"],
@@ -37,6 +37,7 @@ async function refreshOperationState() {
   const resources = [
     ["jobs", "/v1/jobs"], ["candidates", "/v1/candidates"], ["users", "/v1/users"],
     ["applications", "/v1/applications"], ["offers", "/v1/offers"], ["interviews", "/v1/interviews"],
+    ["notifications", "/v1/notifications"],
   ];
   const results = await Promise.allSettled(resources.map(([, path]) => operationApi(path)));
   results.forEach((result, index) => { if (result.status === "fulfilled") operationState[resources[index][0]] = result.value; });
@@ -143,12 +144,64 @@ function renderPipeline() {
   if (!operationState.applications.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无申请，关联职位与候选人后启动流程。</p>"; }
   else {
     container.className = "record-list";
-    container.innerHTML = operationState.applications.slice(0, 6).map((item) => `<div class="record-row"><span><strong>${escapeHtml(candidateName(item.candidate_id))}<em class="stage-pill">${escapeHtml(stageNames[item.stage])}</em></strong><small>${escapeHtml(jobName(item.job_id))} · v${item.version}</small></span><span class="record-actions">${applicationTransitions[item.stage].length ? `<button class="record-action" data-advance="${item.id}">推进</button>` : ""}</span></div>`).join("");
+    container.innerHTML = operationState.applications.map((item) => `<div class="record-row"><span><strong>${escapeHtml(candidateName(item.candidate_id))}<em class="stage-pill">${escapeHtml(stageNames[item.stage])}</em></strong><small>${escapeHtml(jobName(item.job_id))} · v${item.version} · ${escapeHtml(new Date(item.updated_at).toLocaleString("zh-CN"))}</small></span><span class="record-actions"><button class="record-action" data-application-detail="${item.id}">详情</button>${applicationTransitions[item.stage].length ? `<button class="record-action" data-advance="${item.id}">推进</button>` : ""}</span></div>`).join("");
   }
   const offers = document.querySelector("#offer-list");
   if (!operationState.offers.length) { offers.className = "record-list empty-state"; offers.innerHTML = "<p>暂无 Offer，申请进入 Offer 阶段后可起草。</p>"; return; }
   offers.className = "record-list";
-  offers.innerHTML = operationState.offers.slice(0, 6).map((item) => { const app = byId(operationState.applications, item.application_id); return `<div class="record-row"><span><strong>${escapeHtml(candidateName(app?.candidate_id))}<em class="stage-pill">${escapeHtml(offerNames[item.status])}</em></strong><small>${escapeHtml((item.salary_amount / 100).toLocaleString("zh-CN"))} ${escapeHtml(item.currency)} · v${item.version}</small></span><span class="record-actions">${offerTransitions[item.status].length ? `<button class="record-action" data-offer-action="${item.id}">更新</button>` : ""}</span></div>`; }).join("");
+  offers.innerHTML = operationState.offers.map((item) => { const app = byId(operationState.applications, item.application_id); return `<div class="record-row"><span><strong>${escapeHtml(candidateName(app?.candidate_id))}<em class="stage-pill">${escapeHtml(offerNames[item.status])}</em></strong><small>${escapeHtml((item.salary_amount / 100).toLocaleString("zh-CN"))} ${escapeHtml(item.currency)} · v${item.version}</small></span><span class="record-actions"><button class="record-action" data-offer-detail="${item.id}">详情</button>${offerTransitions[item.status].length ? `<button class="record-action" data-offer-action="${item.id}">更新</button>` : ""}</span></div>`; }).join("");
+}
+
+function renderNotifications() {
+  const container = document.querySelector("#notification-list");
+  if (!operationState.notifications.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无通知；业务事件消费后会在这里展示。</p>"; return; }
+  container.className = "record-list notification-list";
+  container.innerHTML = operationState.notifications.map((item) => `<div class="notification-row ${item.read_at ? "" : "unread"}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content)}</small></span><time>${escapeHtml(new Date(item.created_at).toLocaleString("zh-CN"))}</time></div>`).join("");
+}
+
+function detailField(label, value) { return `<div class="detail-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`; }
+function timelineRows(rows, fromKey, toKey, labels) {
+  if (!rows.length) return '<div class="empty-state compact"><p>暂无审计记录</p></div>';
+  return rows.map((row) => `<div class="timeline-item"><span class="timeline-marker"></span><div><strong>${escapeHtml(row[fromKey] ? labels[row[fromKey]] || row[fromKey] : "创建")} → ${escapeHtml(labels[row[toKey]] || row[toKey])}</strong><p>${escapeHtml(row.reason || "状态变更已记录")}</p><time>${escapeHtml(new Date(row.created_at).toLocaleString("zh-CN"))} · 操作者 ${escapeHtml(row.actor_id)}</time></div></div>`).join("");
+}
+
+function openDetailPanel(kicker, title, summary, timeline) {
+  document.querySelector("#detail-kicker").textContent = kicker;
+  document.querySelector("#detail-title").textContent = title;
+  document.querySelector("#detail-summary").innerHTML = summary;
+  document.querySelector("#audit-timeline").innerHTML = timeline;
+  const panel = document.querySelector("#ats-detail");
+  panel.classList.remove("hidden");
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function showApplicationDetail(applicationId) {
+  try {
+    const item = byId(operationState.applications, applicationId);
+    if (!item) throw new Error("申请不存在或已刷新");
+    const [audits, rounds] = await Promise.all([operationApi(`/v1/applications/${item.id}/audit`), operationApi(`/v1/jobs/${item.job_id}/rounds`)]);
+    const summary = `<div class="detail-identity"><span class="detail-avatar">${escapeHtml(candidateName(item.candidate_id).slice(0, 1))}</span><div><p>候选人</p><h4>${escapeHtml(candidateName(item.candidate_id))}</h4><small>${escapeHtml(jobName(item.job_id))}</small></div><em class="stage-pill">${escapeHtml(stageNames[item.stage])}</em></div><div class="detail-fields">${detailField("申请 ID", item.id)}${detailField("版本", `v${item.version}`)}${detailField("创建时间", new Date(item.created_at).toLocaleString("zh-CN"))}${detailField("更新时间", new Date(item.updated_at).toLocaleString("zh-CN"))}${detailField("面试轮次", rounds.length ? rounds.map((round) => `${round.sequence}. ${round.name}`).join(" / ") : "尚未配置")}</div>`;
+    openDetailPanel("APPLICATION DETAIL", `${candidateName(item.candidate_id)} · 申请详情`, summary, timelineRows(audits, "from_stage", "to_stage", stageNames));
+  } catch (error) { operationToast(error.message); }
+}
+
+async function showOfferDetail(offerId) {
+  try {
+    const item = byId(operationState.offers, offerId); const application = byId(operationState.applications, item?.application_id);
+    if (!item) throw new Error("Offer 不存在或已刷新");
+    const audits = await operationApi(`/v1/offers/${item.id}/audit`);
+    const summary = `<div class="detail-identity"><span class="detail-avatar">¥</span><div><p>Offer 对象</p><h4>${escapeHtml(candidateName(application?.candidate_id))}</h4><small>${escapeHtml(jobName(application?.job_id))}</small></div><em class="stage-pill">${escapeHtml(offerNames[item.status])}</em></div><div class="detail-fields">${detailField("Offer ID", item.id)}${detailField("薪资", `${(item.salary_amount / 100).toLocaleString("zh-CN")} ${item.currency}`)}${detailField("版本", `v${item.version}`)}${detailField("入职日期", item.start_date || "未设置")}${detailField("有效期", item.expires_at ? new Date(item.expires_at).toLocaleString("zh-CN") : "未设置")}</div>`;
+    openDetailPanel("OFFER DETAIL", `${candidateName(application?.candidate_id)} · Offer 详情`, summary, timelineRows(audits, "from_status", "to_status", offerNames));
+  } catch (error) { operationToast(error.message); }
+}
+
+async function showInterviewDetail(interviewId) {
+  try {
+    const [item, audits, scorecards] = await Promise.all([operationApi(`/v1/interviews/${interviewId}`), operationApi(`/v1/interviews/${interviewId}/audit`), operationApi(`/v1/interviews/${interviewId}/scorecards`)]);
+    const summary = `<div class="detail-identity"><span class="detail-avatar">◫</span><div><p>面试安排</p><h4>${escapeHtml(candidateName(item.candidate_id))}</h4><small>${escapeHtml(jobName(item.job_id))}</small></div><em class="stage-pill">${escapeHtml(item.status)}</em></div><div class="detail-fields">${detailField("开始", new Date(item.starts_at).toLocaleString("zh-CN"))}${detailField("结束", new Date(item.ends_at).toLocaleString("zh-CN"))}${detailField("版本", `v${item.version}`)}${detailField("评分卡", scorecards.length ? scorecards.map((score) => `${score.overall_score}/5 · ${score.recommendation}${score.submitted_at ? "（已提交）" : "（草稿）"}`).join(" / ") : "尚未填写")}${detailField("会议地址", item.meeting_url || "未设置")}</div>`;
+    const statusLabels = { scheduled: "已安排", confirmed: "已确认", cancelled: "已取消", completed: "已完成" };
+    openDetailPanel("INTERVIEW DETAIL", `${candidateName(item.candidate_id)} · 面试详情`, summary, timelineRows(audits, "from_status", "to_status", statusLabels));
+  } catch (error) { operationToast(error.message); }
 }
 
 async function loadRecords() {
@@ -158,6 +211,7 @@ async function loadRecords() {
     renderSimpleRecords("#job-list", operationState.jobs, (job) => job.title, (job) => `状态：${job.status}`);
     renderSimpleRecords("#candidate-list", operationState.candidates, (candidate) => candidate.full_name, (candidate) => candidate.email);
     renderPipeline();
+    renderNotifications();
   } catch (_) { /* dashboard handles expired sessions */ }
 }
 
@@ -165,9 +219,16 @@ document.querySelectorAll(".quick-action,.mini-action").forEach((button) => butt
 document.addEventListener("click", (event) => {
   const advance = event.target.closest("[data-advance]");
   const offerAction = event.target.closest("[data-offer-action]");
+  const applicationDetail = event.target.closest("[data-application-detail]");
+  const offerDetail = event.target.closest("[data-offer-detail]");
+  const interviewDetail = event.target.closest("[data-interview-detail]");
   if (advance) openOperation("stage", advance.dataset.advance);
   if (offerAction) openOperation("offer-status", offerAction.dataset.offerAction);
+  if (applicationDetail) showApplicationDetail(applicationDetail.dataset.applicationDetail);
+  if (offerDetail) showOfferDetail(offerDetail.dataset.offerDetail);
+  if (interviewDetail) showInterviewDetail(interviewDetail.dataset.interviewDetail);
 });
+document.querySelector("#detail-close").addEventListener("click", () => document.querySelector("#ats-detail").classList.add("hidden"));
 
 document.querySelector("#job-submit").addEventListener("click", () => completeOperation("职位已创建", () => operationApi("/v1/jobs", { method: "POST", body: JSON.stringify({ title: document.querySelector("#job-title").value.trim(), hiring_manager_id: document.querySelector("#job-manager").value || null }) })));
 document.querySelector("#candidate-submit").addEventListener("click", () => completeOperation("候选人已录入", () => operationApi("/v1/candidates", { method: "POST", body: JSON.stringify({ full_name: document.querySelector("#candidate-name").value.trim(), email: document.querySelector("#candidate-email").value.trim(), phone: document.querySelector("#candidate-phone").value.trim() || null }) })));

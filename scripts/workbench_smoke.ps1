@@ -5,6 +5,15 @@ $baseUrl = "http://localhost:8000"
 $runId = Get-Date -Format "yyyyMMddHHmmss"
 $password = "HireFlowWorkbenchPassword!2026"
 
+$homeResponse = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/"
+$operations = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/assets/operations.js"
+if ($homeResponse.Content -notmatch 'id="ats-detail"' -or $homeResponse.Content -notmatch 'id="notification-list"') {
+    throw "workbench is missing ATS detail or notification panels"
+}
+if ($operations.Content -notmatch 'data-application-detail' -or $operations.Content -notmatch 'audit-timeline') {
+    throw "workbench assets are missing ATS detail and audit timeline behavior"
+}
+
 function Invoke-HireFlowJson {
     param([string] $Path, [object] $Body, [hashtable] $Headers = @{})
     Invoke-RestMethod -Method Post -Uri "$baseUrl$Path" -ContentType "application/json" `
@@ -47,5 +56,6 @@ if ($overview.open_jobs -ne 1 -or $overview.candidates -ne 1 -or $overview.upcom
     suggested_at = $suggestion.starts_at
     first_schedule = $first.StatusCode
     conflicting_schedule = $conflict
+    ats_detail_ui = "verified"
     result = "workbench workflow verified"
 } | Format-List
