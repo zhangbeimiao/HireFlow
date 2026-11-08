@@ -11,11 +11,33 @@ function Invoke-HireFlowJson {
         -Headers $Headers -Body ($Body | ConvertTo-Json -Depth 5)
 }
 
+function Get-ResponseHeader {
+    param([object] $Response, [string] $Name)
+
+    # Windows PowerShell exposes WebHeaderCollection while PowerShell 7 on the
+    # Ubuntu runner exposes a dictionary of string arrays. Enumerating entries
+    # and comparing names explicitly keeps the smoke test portable and avoids
+    # relying on implementation-specific key casing.
+    foreach ($entry in $Response.Headers.GetEnumerator()) {
+        $entryHasKey = $entry.PSObject.Properties.Name -contains "Key"
+        $headerName = if ($entryHasKey) { [string]$entry.Key } else { [string]$entry }
+        if (-not [string]::Equals($headerName, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        $entryHasValue = $entry.PSObject.Properties.Name -contains "Value"
+        $value = if ($entryHasValue) { $entry.Value } else { $Response.Headers[$headerName] }
+        return [string](@($value) -join ",")
+    }
+
+    return ""
+}
+
 function Invoke-CachedList {
     param([string] $Path, [hashtable] $Headers)
     $response = Invoke-WebRequest -Method Get -Uri "$baseUrl$Path" -Headers $Headers -UseBasicParsing
     return @{
-        Cache = [string]$response.Headers["X-Cache"]
+        Cache = Get-ResponseHeader $response "X-Cache"
         Items = @($response.Content | ConvertFrom-Json)
     }
 }
