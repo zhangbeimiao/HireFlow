@@ -1,6 +1,9 @@
 FROM python:3.12-slim
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install --only-upgrade --yes apt libapt-pkg7.0 zlib1g \
+    && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml README.md alembic.ini ./
 COPY src ./src
 COPY migrations ./migrations
