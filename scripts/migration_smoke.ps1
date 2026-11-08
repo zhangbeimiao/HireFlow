@@ -20,6 +20,7 @@ if ($LASTEXITCODE -ne 0) { throw "failed to create isolated database $database" 
 
 try {
     $command = @'
+MIGRATION_CHECK_DB="$(printf '%s' "$MIGRATION_CHECK_DB" | tr -d '\r\n')"
 export HIREFLOW_MIGRATION_DATABASE_URL="${HIREFLOW_MIGRATION_DATABASE_URL%/*}/${MIGRATION_CHECK_DB}"
 python -c "import os; from sqlalchemy import create_engine, text; e=create_engine(os.environ['HIREFLOW_MIGRATION_DATABASE_URL']); actual=e.connect().execute(text('select current_database()')).scalar(); assert actual == os.environ['MIGRATION_CHECK_DB'], (actual, os.environ['MIGRATION_CHECK_DB'])"
 alembic upgrade head
