@@ -51,3 +51,11 @@ Broker ACK 与 PostgreSQL 状态更新不是一个原子事务。如果消息已
 ### 为什么要区分 liveness 和 readiness？
 
 Liveness 只回答进程是否活着，依赖抖动时不应通过重启制造更大压力；readiness 回答实例是否适合接流量。HireFlow 将 PostgreSQL 视为关键依赖，不可用返回 503；Redis 故障可回源数据库，因此返回 degraded 但保持就绪。RabbitMQ 由 Outbox 解耦，不阻断同步 API，故障通过 Relay 重试与积压指标暴露。
+
+### 你如何证明故障恢复不是只写在设计文档里？
+
+项目提供统一的 `failure_drill.ps1`：依次重启 Relay 和 Consumer、模拟重复投递与人工重放、中断并恢复 RabbitMQ、停止 Redis 验证回源 PostgreSQL，再停止 PostgreSQL 验证 readiness 返回 503 而 liveness 仍为 200。最后脚本检查依赖恢复、Outbox 最终发布以及 Inbox 副作用不重复。它和 4 个真实 API 集成测试都会在 Docker CI 环境执行。
+
+### 项目如何保证测试结果可复现？
+
+开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前基线包含 42 个单元测试、4 个 ATS 集成测试，并在 CI 中补充 Ruff、Go race test、RLS、并发 `201/409`、缓存、故障演练及依赖/镜像安全扫描。

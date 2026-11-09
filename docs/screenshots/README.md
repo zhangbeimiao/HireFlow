@@ -8,14 +8,13 @@
 $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 ```
 
-建议按以下文件名采集：
+当前已采集并随仓库发布的证据：
 
 | 文件名 | 操作 | 证明点 |
 | --- | --- | --- |
-| `01-compose-stack.png` | 执行 `docker compose ps` | PostgreSQL、Redis、RabbitMQ、API、Relay、Consumer 处于可用状态。 |
-| `02-swagger.png` | 打开 `http://localhost:8000/docs` | 可浏览、可调试的 OpenAPI 接口。 |
-| `03-concurrency.png` | 执行 `.\scripts\concurrency_smoke.ps1` | 同一唯一时段的并发请求得到一个 `201` 与一个 `409`。 |
-| `04-rabbitmq.png` | 打开 `http://localhost:15672` | 事件主队列、重试队列与 DLQ。 |
-| `05-metrics.png` | 打开 `http://localhost:8000/metrics` | Prometheus HTTP 请求与延迟指标。 |
+| `01-ats-audit-timeline.jpg` | 打开申请详情 | Application 状态、版本、负责人及不可覆盖的审计时间线。 |
+| `02-workbench.jpg` | 打开招聘工作台 | 职位、候选人、申请和系统状态的真实聚合视图。 |
+| `03-scheduling-conflict.jpg` | 对已占用时段再次排期 | 数据库最终裁决返回可理解的 `409 Conflict`。 |
+| `04-prometheus-metrics.jpg` | 打开 `http://localhost:8000/metrics` | HTTP、依赖和业务指标已暴露给 Prometheus。 |
 
-完成后，在项目根目录执行 `git add docs/screenshots`，截图会随下一次提交发布。README 只引用实际存在的图片，避免展示失效链接。
+截图均来自本地 Docker Compose 真实运行，不使用生产数据。README 只引用实际存在的图片，避免展示失效链接；新增图片前仍需检查 Token、密码、绝对路径和个人邮箱。

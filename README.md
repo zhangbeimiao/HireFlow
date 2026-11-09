@@ -17,7 +17,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 - **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
 - **幂等通知**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重，支持重试队列、DLQ 和 Owner 人工重放。
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效并设置 TTL。
-- **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；排期与乐观锁冲突直接呈现为 `409 Conflict`。
+- **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
 ## 架构
 
@@ -35,7 +35,15 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
 
 ## 运行截图
 
-真实运行截图的采集步骤与脱敏要求见 [截图说明](docs/screenshots/README.md)。建议至少展示 Docker 服务栈、Swagger、RabbitMQ 队列、Prometheus 指标及并发排期 `201/409` 结果。
+以下图片来自本地 Docker Compose 环境的真实验收流程，使用虚构企业和候选人数据；采集与脱敏说明见 [截图说明](docs/screenshots/README.md)。
+
+| 招聘工作台 | ATS 详情与审计时间线 |
+| --- | --- |
+| ![HireFlow 招聘工作台](docs/screenshots/02-workbench.jpg) | ![ATS 审计时间线](docs/screenshots/01-ats-audit-timeline.jpg) |
+
+| 数据库并发冲突保护 | Prometheus 指标 |
+| --- | --- |
+| ![排期冲突返回 409](docs/screenshots/03-scheduling-conflict.jpg) | ![Prometheus 指标](docs/screenshots/04-prometheus-metrics.jpg) |
 
 ## 快速启动
 
@@ -66,6 +74,9 @@ docker compose up --build -d
 python -m pip install -e ".[dev]"
 python -m ruff check src tests migrations
 python -m pytest -q
+# Docker Compose 已启动后运行 4 个黑盒 ATS API 集成测试
+$env:HIREFLOW_RUN_INTEGRATION = "1"
+python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 .\scripts\demo.ps1
 .\scripts\workbench_smoke.ps1
@@ -76,8 +87,7 @@ python -m pytest -q
 .\scripts\rate_limit_smoke.ps1
 .\scripts\observability_smoke.ps1
 .\scripts\concurrency_smoke.ps1
-.\scripts\reliability_smoke.ps1
-.\scripts\go_relay_recovery_smoke.ps1
+.\scripts\failure_drill.ps1
 .\scripts\rls_smoke.ps1
 .\scripts\cache_smoke.ps1
 .\scripts\pagination_smoke.ps1
@@ -94,6 +104,8 @@ python -m pytest -q
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
+当前回归基线为 `42` 个 Python 单元测试和 `4` 个真实 HTTP/PostgreSQL/RabbitMQ 黑盒 ATS 集成测试；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+
 | 脚本 | 验证结果 |
 | --- | --- |
 | `demo.ps1` | 创建招聘流程、排期、确认状态和 4 条站内通知。 |
@@ -107,8 +119,7 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |
 | `concurrency_smoke.ps1` | 两位候选人并发抢唯一时段：恰好一个 `201`、一个 `409`。 |
 | `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
-| `reliability_smoke.ps1` | 验证 Inbox 重复投递幂等、提交后重投、失败证据/人工重放状态与 Outbox 持久化重试。 |
-| `go_relay_recovery_smoke.ps1` | 主动中断 RabbitMQ，验证 Go Relay readiness、Outbox 可恢复状态、自动重连与 Inbox 单次副作用。 |
+| `failure_drill.ps1` | 统一演练 Relay/Consumer 重启、Inbox 幂等与人工重放、RabbitMQ 中断恢复、Redis 回源降级，以及 PostgreSQL 故障时 `readiness=503`、`liveness=200`；恢复后验证消息无丢失且副作用不重复。 |
 | `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
 | `cache_smoke.ps1` | 验证职位/候选人列表 MISS→HIT、创建/更新后失效、租户级 Key、TTL 与缓存指标。 |
 | `pagination_smoke.ps1` | 验证职位/候选人 Keyset 分页 `20 + 3` 条无重复遗漏、非法游标 `422` 及首页缓存策略。 |
