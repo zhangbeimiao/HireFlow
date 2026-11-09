@@ -2,6 +2,7 @@ const operationDialog = document.querySelector("#operation-dialog");
 const operationError = document.querySelector("#operation-error");
 const operationState = { jobs: [], candidates: [], users: [], applications: [], offers: [], interviews: [], notifications: [], rounds: [] };
 const viewState = { jobPage: 1, candidatePage: 1, pageSize: 4, calendarStart: startOfWeek(new Date()) };
+let draggedApplicationId = null;
 
 const applicationTransitions = {
   applied: ["screening", "rejected", "withdrawn"],
@@ -131,6 +132,19 @@ async function completeOperation(successMessage, action) {
   }
 }
 
+async function transitionApplication(applicationId, targetStage, reason = null) {
+  const item = byId(operationState.applications, applicationId);
+  if (!item) throw new Error("申请不存在或已刷新，请重新加载后再试。");
+  if (!applicationTransitions[item.stage].includes(targetStage)) {
+    throw new Error(`不能从“${stageNames[item.stage]}”直接流转到“${stageNames[targetStage]}”。`);
+  }
+  await operationApi(`/v1/applications/${item.id}/stage`, {
+    method: "POST",
+    body: JSON.stringify({ stage: targetStage, version: item.version, reason }),
+  });
+  await Promise.all([loadOverview(), loadRecords()]);
+}
+
 function renderSimpleRecords(target, items, primary, secondary, pageKey, pageLabel) {
   const container = document.querySelector(target);
   if (!items.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无数据，使用上方快捷操作开始创建。</p>"; return; }
@@ -174,7 +188,7 @@ function renderPipeline() {
     const stages = selectedStage ? [selectedStage] : Object.keys(stageNames);
     container.innerHTML = stages.map((stage) => {
       const items = applications.filter((item) => item.stage === stage);
-      return `<section class="kanban-column" data-stage="${stage}"><header><span>${escapeHtml(stageNames[stage])}</span><b>${items.length}</b></header><div class="kanban-cards">${items.length ? items.map((item) => `<article class="kanban-card"><button data-application-detail="${item.id}"><strong>${escapeHtml(candidateName(item.candidate_id))}</strong><small>${escapeHtml(jobName(item.job_id))}</small><time>${escapeHtml(new Date(item.updated_at).toLocaleDateString("zh-CN"))}</time></button>${applicationTransitions[item.stage].length ? `<button class="kanban-advance" data-advance="${item.id}">推进 →</button>` : ""}</article>`).join("") : '<p class="kanban-empty">暂无申请</p>'}</div></section>`;
+      return `<section class="kanban-column" data-stage="${stage}"><header><span>${escapeHtml(stageNames[stage])}</span><b>${items.length}</b></header><div class="kanban-cards">${items.length ? items.map((item) => `<article class="kanban-card" data-application-card="${item.id}" draggable="${applicationTransitions[item.stage].length ? "true" : "false"}"><button data-application-detail="${item.id}"><strong>${escapeHtml(candidateName(item.candidate_id))}</strong><small>${escapeHtml(jobName(item.job_id))}</small><time>${escapeHtml(new Date(item.updated_at).toLocaleDateString("zh-CN"))}</time></button>${applicationTransitions[item.stage].length ? `<button class="kanban-advance" data-advance="${item.id}">推进 →</button>` : ""}</article>`).join("") : '<p class="kanban-empty">暂无申请</p>'}</div></section>`;
     }).join("");
   }
   const offers = document.querySelector("#offer-list");
@@ -284,6 +298,45 @@ document.addEventListener("click", (event) => {
       .then(() => operationToast("通知已标记为已读"))
       .catch((error) => operationToast(error.message));
   }
+});
+document.addEventListener("dragstart", (event) => {
+  const card = event.target.closest("[data-application-card]");
+  if (!card || card.getAttribute("draggable") !== "true") return;
+  draggedApplicationId = card.dataset.applicationCard;
+  card.classList.add("dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", draggedApplicationId);
+});
+document.addEventListener("dragover", (event) => {
+  const column = event.target.closest(".kanban-column[data-stage]");
+  const item = byId(operationState.applications, draggedApplicationId);
+  if (!column || !item) return;
+  const allowed = applicationTransitions[item.stage].includes(column.dataset.stage);
+  column.classList.toggle("drop-target", allowed);
+  column.classList.toggle("drop-blocked", !allowed && column.dataset.stage !== item.stage);
+  if (allowed) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; }
+});
+document.addEventListener("dragleave", (event) => {
+  const column = event.target.closest(".kanban-column[data-stage]");
+  if (column && !column.contains(event.relatedTarget)) column.classList.remove("drop-target", "drop-blocked");
+});
+document.addEventListener("drop", async (event) => {
+  const column = event.target.closest(".kanban-column[data-stage]");
+  const applicationId = draggedApplicationId || event.dataTransfer.getData("text/plain");
+  if (!column || !applicationId) return;
+  event.preventDefault();
+  document.querySelectorAll(".kanban-column").forEach((item) => item.classList.remove("drop-target", "drop-blocked"));
+  try {
+    await transitionApplication(applicationId, column.dataset.stage, "招聘人员通过看板拖拽流转");
+    operationToast(`申请已流转至“${stageNames[column.dataset.stage]}”`);
+  } catch (error) {
+    operationToast(error.status === 409 ? `阶段已被其他操作更新（409 Conflict）：${error.message}` : error.message);
+  } finally { draggedApplicationId = null; }
+});
+document.addEventListener("dragend", (event) => {
+  event.target.closest("[data-application-card]")?.classList.remove("dragging");
+  document.querySelectorAll(".kanban-column").forEach((item) => item.classList.remove("drop-target", "drop-blocked"));
+  draggedApplicationId = null;
 });
 document.querySelector("#detail-close").addEventListener("click", closeDetailPanel);
 document.querySelector("#detail-backdrop").addEventListener("click", closeDetailPanel);

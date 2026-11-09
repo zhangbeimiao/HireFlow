@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timedelta
 from uuid import uuid4
 
@@ -58,6 +59,16 @@ def test_frontend_completes_recruiting_loop(page: Page) -> None:
     page.locator("#bootstrap-submit").click()
     expect(page.locator("#open-auth")).to_contain_text("已连接")
 
+    page.evaluate("localStorage.setItem('hireflow.access_token', 'expired.browser.token')")
+    page.locator("#refresh").click()
+    for _ in range(30):
+        if page.evaluate("localStorage.getItem('hireflow.access_token')") != "expired.browser.token":
+            break
+        time.sleep(0.1)
+    renewed_access_token = page.evaluate("localStorage.getItem('hireflow.access_token')")
+    assert renewed_access_token and renewed_access_token != "expired.browser.token"
+    assert page.evaluate("Object.keys(localStorage)") == ["hireflow.access_token"]
+
     _open_operation(page, "job")
     page.locator("#job-title").fill(f"后端工程师 {suffix}")
     page.locator("#job-submit").click()
@@ -83,7 +94,22 @@ def test_frontend_completes_recruiting_loop(page: Page) -> None:
     expect(page.locator("#operation-dialog")).not_to_be_visible()
     expect(page.locator("#interview-list")).to_contain_text(candidate_name)
 
-    _advance(page, "screening")
+    _open_operation(page, "schedule")
+    page.locator("#schedule-application").select_option(index=1)
+    page.locator("#schedule-start").fill(starts_at.strftime("%Y-%m-%dT%H:%M"))
+    page.locator("#schedule-end").fill(ends_at.strftime("%Y-%m-%dT%H:%M"))
+    page.locator("#schedule-submit").click()
+    expect(page.locator("#operation-error")).to_contain_text("409 Conflict")
+    expect(page.locator("#operation-dialog")).to_be_visible()
+    page.locator("#operation-dialog .close").click()
+
+    page.drag_and_drop(
+        f'[data-application-card]:has-text("{candidate_name}")',
+        '.kanban-column[data-stage="screening"]',
+    )
+    expect(
+        page.locator('.kanban-column[data-stage="screening"]')
+    ).to_contain_text(candidate_name)
     _advance(page, "interview")
 
     _open_operation(page, "scorecard")
