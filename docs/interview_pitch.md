@@ -6,7 +6,7 @@ HireFlow 是我独立实现的多租户 ATS 与面试调度平台，覆盖职位
 
 我使用 FastAPI 和 PostgreSQL 实现主业务，时间统一以 UTC 保存、用半开区间计算重叠；应用层先做冲突预检以返回友好的错误，但最终通过 PostgreSQL 的 GiST 排他约束保证多实例并发下只有一个事务提交。并发脚本实际验证了两个请求抢唯一时段时得到一个 201 和一个 409。
 
-通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Go Relay 使用 pgx 原子抢占、RabbitMQ Publisher Confirm、租约和指数退避完成可靠投递。Python Consumer 用 Inbox 事件 ID 去重，支持重试、死信与 Owner 人工重放。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志，并分别暴露 API、Relay、Consumer 的 Prometheus 指标，以 Docker Compose 一键运行。
+通知方面，我采用 Transactional Outbox：面试变更与 Outbox 事件在一个数据库事务中提交，独立 Go Relay 使用 pgx 原子抢占、RabbitMQ Publisher Confirm、租约和指数退避完成可靠投递。Python Consumer 用 Inbox 事件 ID 去重，支持重试、死信、人工重放和 SMTP 投递。项目还加入 JWT/RBAC、数据库 RLS、Redis Cache Aside 与限流、请求 ID、结构化日志，并分别暴露 API、Relay、Consumer 的 Prometheus 指标，以 Docker Compose 一键运行。
 
 申请和 Offer 使用显式状态机、版本号乐观锁与审计表；评分卡最终提交后不可修改。接受 Offer 时，Offer、Application、双方审计和 Outbox 事件在同一事务内完成，避免出现“Offer 已接受但候选人仍停留在面试阶段”的跨表不一致。
 
@@ -19,6 +19,10 @@ Redis 锁可减少冲突，但 Redis 不是排期事实来源，也无法替代�
 ### 为什么缓存命中时不能仍然创建数据库会话？
 
 如果 FastAPI 在进入缓存判断前就初始化 RLS 会话，即使命中 Redis 也会产生数据库连接和 `set_config` 往返，缓存收益会被抵消。HireFlow 将租户数据库会话延迟到 MISS loader 内部；本机 Locust 对比中，热缓存吞吐约提升 42%，同时 P95/P99 均下降。
+
+### 多实例下如何避免缓存击穿？
+
+本地锁只能约束单进程，因此 HireFlow 用带短租约的 Redis `SET NX` 作为跨实例重建锁，未拿到锁的请求短暂等待并读取首个实例写入的结果。隔离压测通过 Nginx 将 30 个同步冷读分散到 3 个 API 容器，实例响应头证明三者都接到请求，最终只有 1 个 `MISS` 和 1 次数据库回源，回源放大倍数为 `1×`。
 
 ### 推荐时段为什么仍可能创建失败？
 
@@ -46,7 +50,15 @@ Broker ACK 与 PostgreSQL 状态更新不是一个原子事务。如果消息已
 
 ### 目前有哪些边界？
 
-通知是站内信模拟，未对接邮件供应商；Prometheus/Grafana 已提供本地面板与示例告警，但阈值尚未经过生产流量校准；缓存未实现热点 Key 请求合并，限流仍使用固定窗口，生产场景可根据流量演进。
+SMTP Provider、模板、投递记录和失败重试已实现，本地使用 Mailpit 验收，但没有绑定真实生产供应商账号和投递 SLA；TLS 演练使用一次性测试 CA，生产仍需接入托管 PKI 和证书轮换；备份演练目前验证逻辑备份恢复，尚未覆盖 WAL 归档与时间点恢复；限流仍使用固定窗口，生产场景可按流量演进。
+
+### Refresh Token 为什么要做 Family？
+
+浏览器只把短期 Access Token 放在内存/短期存储中，长期 Refresh Token 放在 `HttpOnly + Secure + SameSite=Strict` Cookie，刷新和退出使用 CSRF 双提交。每次刷新都会轮换 Token 并继承同一 `family_id`；如果旧 Token 再次出现，服务端将其判断为重放并撤销整个 Family，避免攻击者拿着旧 Token 与合法浏览器长期竞争。
+
+### 如何证明 TLS 和备份不是只写了配置？
+
+`tls_smoke.ps1` 在一次性 Docker 卷中生成 CA、PostgreSQL/RabbitMQ 服务端证书和客户端证书，实际执行 PostgreSQL `verify-full` 查询与 RabbitMQ 双向 TLS 1.3 握手。`backup_restore_smoke.ps1` 对业务库做 custom-format 逻辑备份，恢复到随机临时库，再逐表比较 20 张表的精确行数和确定性内容哈希，最后只清理经过前缀校验的临时库。
 
 ### 为什么要区分 liveness 和 readiness？
 
@@ -54,8 +66,8 @@ Liveness 只回答进程是否活着，依赖抖动时不应通过重启制造�
 
 ### 你如何证明故障恢复不是只写在设计文档里？
 
-项目提供统一的 `failure_drill.ps1`：依次重启 Relay 和 Consumer、模拟重复投递与人工重放、中断并恢复 RabbitMQ、停止 Redis 验证回源 PostgreSQL，再停止 PostgreSQL 验证 readiness 返回 503 而 liveness 仍为 200。最后脚本检查依赖恢复、Outbox 最终发布以及 Inbox 副作用不重复。它和 4 个真实 API 集成测试都会在 Docker CI 环境执行。
+项目提供统一的 `failure_drill.ps1`：依次重启 Relay 和 Consumer、模拟重复投递与人工重放、中断并恢复 RabbitMQ、停止 Redis 验证回源 PostgreSQL，再停止 PostgreSQL 验证 readiness 返回 503 而 liveness 仍为 200。最后脚本检查依赖恢复、Outbox 最终发布以及 Inbox 副作用不重复。它和 8 个真实 API 集成测试都会在 Docker CI 环境执行。
 
 ### 项目如何保证测试结果可复现？
 
-开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前基线包含 42 个单元测试、4 个 ATS 集成测试，并在 CI 中补充 Ruff、Go race test、RLS、并发 `201/409`、缓存、故障演练及依赖/镜像安全扫描。
+开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前基线包含 51 个单元测试、8 个 ATS/认证集成测试和 1 条 Playwright E2E 流程；CI 还执行 Ruff、Go race test、RLS、并发 `201/409`、多实例热点 Key、TLS、备份恢复、故障演练及依赖/镜像安全扫描。

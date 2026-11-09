@@ -124,6 +124,8 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `email_failure_smoke.ps1` | 使用一次性不可达 SMTP Provider 验证失败持久化、指数退避、恢复后成功发送及无重复 Delivery。 |
 | `stack_smoke.ps1` | 检查 Compose 服务、兼容健康接口、进程 liveness 与 PostgreSQL/Redis readiness。 |
 | `migration_smoke.ps1` | 在脚本专用空数据库中验证 Alembic `head → base → head`，先校验目标库名且不触碰业务库。 |
+| `tls_smoke.ps1` | 一次性 CA 签发真实证书，验证 PostgreSQL `verify-full` 查询与 RabbitMQ 双向 TLS 1.3 握手。 |
+| `backup_restore_smoke.ps1` | 逻辑备份恢复到随机临时库，对 20 张表比较精确行数和内容哈希，源库只读。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
 | `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
 | `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |
@@ -135,6 +137,7 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `pagination_smoke.ps1` | 验证职位/候选人 Keyset 分页 `20 + 3` 条无重复遗漏、非法游标 `422` 及首页缓存策略。 |
 | `explain_analyze.ps1` | 事务内生成每表 5000 条数据，验证游标查询命中租户复合索引并回滚测试数据。 |
 | `cache_performance.ps1` | Locust 对比 `Cache-Control: no-cache` 数据库回源与热缓存，输出 RPS、P95、P99。 |
+| `multi_api_hot_key.ps1` | Nginx 分发到 3 个 API 实例，量化同一冷 Key 的数据库回源放大倍数。 |
 | `relay_performance.ps1` | 在隔离 PostgreSQL/RabbitMQ 中以同批大小和轮询周期对比 Go/Python Relay 吞吐、Confirm P95/P99 与内存。 |
 | `relay_performance_matrix.ps1` | Go/Python 各跑 3～5 轮和批大小 10/50/100，输出平均吞吐、P95/P99、CPU、内存及 Markdown 报告。 |
 

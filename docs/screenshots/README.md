@@ -17,4 +17,4 @@ $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 | `03-scheduling-conflict.jpg` | 对已占用时段再次排期 | 数据库最终裁决返回可理解的 `409 Conflict`。 |
 | `04-prometheus-metrics.jpg` | 打开 `http://localhost:8000/metrics` | HTTP、依赖和业务指标已暴露给 Prometheus。 |
 
-截图均来自本地 Docker Compose 真实运行，不使用生产数据。README 只引用实际存在的图片，避免展示失效链接；新增图片前仍需检查 Token、密码、绝对路径和个人邮箱。
+截图均来自本地 Docker Compose 真实运行，不使用生产数据。2026-11-09 已复核四张图片：未包含 Token、Cookie、密码、绝对本地路径或个人邮箱，且与当前 ATS 工作台、审计、冲突处理和指标接口一致。README 只引用实际存在的图片，避免展示失效链接；新增图片前仍需执行同样检查。
