@@ -204,6 +204,18 @@ jobs:
           HIREFLOW_E2E_BASE_URL: http://127.0.0.1:8000
         run: python -m pytest -q -m e2e tests/e2e
 
+      - name: Isolate API contract tests from earlier bootstrap rate-limit fixtures
+        shell: pwsh
+        run: |
+          $keys = @(docker compose exec -T redis redis-cli --scan --pattern "hireflow:rate-limit:POST:/v1/auth/bootstrap:*")
+          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate bootstrap rate-limit fixture keys" }
+          foreach ($key in $keys) {
+            if (-not [string]::IsNullOrWhiteSpace($key)) {
+              docker compose exec -T redis redis-cli UNLINK $key | Out-Null
+              if ($LASTEXITCODE -ne 0) { throw "Could not remove bootstrap rate-limit fixture key" }
+            }
+          }
+
       - name: Verify ATS public API contracts with pytest
         env:
           HIREFLOW_INTEGRATION_BASE_URL: http://127.0.0.1:8000
