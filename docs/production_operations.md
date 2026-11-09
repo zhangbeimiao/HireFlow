@@ -39,6 +39,17 @@ forces the cookie `Secure` flag. JSON-body refresh remains available for non-bro
 
 ## PostgreSQL backup and restore
 
+Run the automated restore drill against the local Compose database:
+
+```powershell
+.\scripts\backup_restore_smoke.ps1
+```
+
+The drill writes a custom-format dump inside the PostgreSQL container, restores it into a uniquely named
+`hireflow_restore_check_*` database, and compares exact row counts plus deterministic row-content hashes for
+every application table. Its `finally` block deletes only the prefix-validated temporary database and dump;
+the source database is never dropped or mutated. CI runs this after creating representative ATS data.
+
 Create a compressed logical backup using credentials from the secret manager:
 
 ```powershell

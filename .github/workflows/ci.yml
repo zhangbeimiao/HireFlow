@@ -200,6 +200,10 @@ jobs:
         shell: pwsh
         run: ./scripts/ats_smoke.ps1
 
+      - name: Verify PostgreSQL logical backup, restore, and data integrity
+        shell: pwsh
+        run: ./scripts/backup_restore_smoke.ps1
+
       - name: Install Playwright Chromium
         run: python -m playwright install --with-deps chromium
 

@@ -60,6 +60,7 @@ $env:Path += ";C:\Program Files\Docker\Docker\resources\bin"
 docker compose up --build -d
 .\scripts\stack_smoke.ps1
 .\scripts\migration_smoke.ps1
+.\scripts\backup_restore_smoke.ps1
 ```
 
 测试和生产配置分别通过 `docker-compose.test.yml` 与 `docker-compose.prod.yml` 叠加；`docker-compose.tls.example.yml` 展示生产证书挂载方式。`./scripts/tls_smoke.ps1` 会用一次性 CA 签发真实服务端/客户端证书，执行 PostgreSQL `verify-full` 查询和 RabbitMQ 双向 TLS 握手，私钥仅保存在临时 Docker 卷。
