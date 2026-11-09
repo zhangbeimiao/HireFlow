@@ -1,5 +1,7 @@
 import asyncio
+import hmac
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,6 +27,7 @@ from hireflow.auth import (
 from hireflow.auth_tokens import (
     InvalidRefreshToken,
     issue_refresh_token,
+    refresh_token_days,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -176,6 +179,63 @@ app.mount("/metrics", make_asgi_app())
 web_root = Path(__file__).parent / "web"
 app.mount("/assets", StaticFiles(directory=web_root), name="assets")
 
+REFRESH_COOKIE = "hireflow_refresh"
+CSRF_COOKIE = "hireflow_csrf"
+
+
+def _cookie_secure() -> bool:
+    value = os.getenv("HIREFLOW_COOKIE_SECURE", "false").strip().lower()
+    if value not in {"true", "false"}:
+        raise RuntimeError("HIREFLOW_COOKIE_SECURE must be true or false")
+    return value == "true"
+
+
+def _set_session_cookies(response: Response, refresh_token: str) -> None:
+    max_age = refresh_token_days() * 24 * 60 * 60
+    csrf_token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        REFRESH_COOKIE,
+        refresh_token,
+        max_age=max_age,
+        httponly=True,
+        secure=_cookie_secure(),
+        samesite="strict",
+        path="/v1/auth",
+    )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        max_age=max_age,
+        httponly=False,
+        secure=_cookie_secure(),
+        samesite="strict",
+        path="/",
+    )
+
+
+def _clear_session_cookies(response: Response) -> None:
+    response.delete_cookie(REFRESH_COOKIE, path="/v1/auth")
+    response.delete_cookie(CSRF_COOKIE, path="/")
+
+
+def _browser_session(request: Request) -> bool:
+    return request.headers.get("X-HireFlow-Client") == "browser"
+
+
+def _refresh_credential(
+    request: Request, payload: RefreshTokenRequest | None
+) -> tuple[str, bool]:
+    if payload is not None:
+        return payload.refresh_token, False
+    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="missing refresh token")
+    csrf_cookie = request.cookies.get(CSRF_COOKIE, "")
+    csrf_header = request.headers.get("X-CSRF-Token", "")
+    if not csrf_cookie or not csrf_header or not hmac.compare_digest(csrf_cookie, csrf_header):
+        raise HTTPException(status_code=403, detail="invalid CSRF token")
+    return refresh_token, True
+
 
 @app.middleware("http")
 async def security_headers(request, call_next):
@@ -315,13 +375,19 @@ async def get_dashboard_overview(
 
 
 @app.post("/v1/auth/bootstrap", response_model=AccessTokenRead, status_code=status.HTTP_201_CREATED)
-async def bootstrap(payload: TenantBootstrap, session: AsyncSession = Depends(get_session)):
+async def bootstrap(
+    payload: TenantBootstrap,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
     try:
         owner = await bootstrap_tenant(session, payload)
         refresh_token = await issue_refresh_token(session, owner)
+        _set_session_cookies(response, refresh_token)
         return AccessTokenRead(
             access_token=create_access_token(owner.id, owner.tenant_id, owner.role),
-            refresh_token=refresh_token,
+            refresh_token=None if _browser_session(request) else refresh_token,
             expires_in=access_token_minutes() * 60,
         )
     except DuplicateResource as error:
@@ -329,38 +395,57 @@ async def bootstrap(payload: TenantBootstrap, session: AsyncSession = Depends(ge
 
 
 @app.post("/v1/auth/tokens", response_model=AccessTokenRead)
-async def login(payload: LoginRequest, session: AsyncSession = Depends(get_session)):
+async def login(
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    session: AsyncSession = Depends(get_session),
+):
     user = await authenticate(session, payload)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid email or password")
+    refresh_token = await issue_refresh_token(session, user)
+    _set_session_cookies(response, refresh_token)
     return AccessTokenRead(
         access_token=create_access_token(user.id, user.tenant_id, user.role),
-        refresh_token=await issue_refresh_token(session, user),
+        refresh_token=None if _browser_session(request) else refresh_token,
         expires_in=access_token_minutes() * 60,
     )
 
 
 @app.post("/v1/auth/refresh", response_model=AccessTokenRead)
 async def refresh_access_token(
-    payload: RefreshTokenRequest, session: AsyncSession = Depends(get_session)
+    request: Request,
+    response: Response,
+    payload: RefreshTokenRequest | None = None,
+    session: AsyncSession = Depends(get_session),
 ) -> AccessTokenRead:
+    raw_token, cookie_session = _refresh_credential(request, payload)
     try:
-        user, refresh_token = await rotate_refresh_token(session, payload.refresh_token)
+        user, refresh_token = await rotate_refresh_token(session, raw_token)
     except InvalidRefreshToken as error:
         raise HTTPException(status_code=401, detail="invalid refresh token") from error
+    _set_session_cookies(response, refresh_token)
     return AccessTokenRead(
         access_token=create_access_token(user.id, user.tenant_id, user.role),
-        refresh_token=refresh_token,
+        refresh_token=None if cookie_session else refresh_token,
         expires_in=access_token_minutes() * 60,
     )
 
 
 @app.post("/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(payload: RefreshTokenRequest, session: AsyncSession = Depends(get_session)) -> None:
+async def logout(
+    request: Request,
+    response: Response,
+    payload: RefreshTokenRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> None:
+    raw_token, _ = _refresh_credential(request, payload)
     try:
-        await revoke_refresh_token(session, payload.refresh_token)
+        await revoke_refresh_token(session, raw_token)
     except InvalidRefreshToken as error:
         raise HTTPException(status_code=401, detail="invalid refresh token") from error
+    _clear_session_cookies(response)
 
 
 @app.post("/v1/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)

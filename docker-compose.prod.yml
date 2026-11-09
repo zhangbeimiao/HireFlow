@@ -21,6 +21,7 @@ services:
       HIREFLOW_JWT_KEYS: ${HIREFLOW_JWT_KEYS:?set rotating JWT key JSON}
       HIREFLOW_JWT_ACTIVE_KEY_ID: ${HIREFLOW_JWT_ACTIVE_KEY_ID:?set active JWT key id}
       HIREFLOW_ALLOWED_HOSTS: ${HIREFLOW_ALLOWED_HOSTS:?set production hosts}
+      HIREFLOW_COOKIE_SECURE: "true"
   outbox-relay:
     ports: !reset []
     restart: unless-stopped

@@ -21,12 +21,7 @@ function clearOperationError() { operationError.style.display = "none"; }
 function operationToast(message) { const box = document.querySelector("#toast"); box.textContent = message; box.classList.add("show"); window.setTimeout(() => box.classList.remove("show"), 2600); }
 
 async function operationApi(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-  headers.Authorization = `Bearer ${operationToken()}`;
-  const response = await fetch(path, { ...options, headers });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) { const error = new Error(data.detail || `请求失败（${response.status}）`); error.status = response.status; throw error; }
-  return data;
+  return api(path, options);
 }
 
 function byId(items, id) { return items.find((item) => item.id === id); }

@@ -31,7 +31,10 @@ only configured ids.
 4. Remove the old key and deploy once more.
 
 Refresh tokens are opaque, tenant-prefixed lookup handles whose SHA-256 hashes are stored under RLS.
-Every refresh revokes the presented token and returns a replacement; replay and logout both fail closed.
+Every refresh revokes the presented token and returns a replacement in the same family. Replaying a
+predecessor revokes every live family member. Browser sessions keep refresh credentials only in a
+HttpOnly/SameSite=Strict cookie and require a matching double-submit CSRF header; production Compose
+forces the cookie `Secure` flag. JSON-body refresh remains available for non-browser automation clients.
 
 ## PostgreSQL backup and restore
 

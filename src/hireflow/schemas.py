@@ -119,7 +119,7 @@ class RefreshTokenRequest(BaseModel):
 
 class AccessTokenRead(BaseModel):
     access_token: str
-    refresh_token: str
+    refresh_token: str | None = None
     expires_in: int
     token_type: str = "bearer"
 

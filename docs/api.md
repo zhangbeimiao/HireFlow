@@ -25,7 +25,7 @@ PostgreSQL 是同步业务的关键依赖，不可用时 readiness 返回 `503`�
 | GET | `/` | 公开 | 中文招聘运营工作台；页面本身不含敏感数据。 |
 | GET | `/v1/dashboard/overview` | 已登录用户 | 返回当前租户的开放职位、候选人、待进行面试、未读通知计数及最近 5 条面试。 |
 
-工作台通过登录或初始化接口取得 JWT；Token 仅保存在浏览器本地存储，并在每次聚合查询时由 `Authorization` 请求头传递。
+工作台通过登录或初始化接口取得短期 JWT，并在 `Authorization` 请求头传递；长期 Refresh Token 仅位于 HttpOnly Cookie，不进入 localStorage 或 JavaScript 响应数据。
 
 ## 调用示例
 
@@ -57,7 +57,9 @@ Content-Type: application/json
 }
 ```
 
-`POST /v1/auth/refresh` 成功后会撤销旧 Refresh Token 并返回新的 Token Pair；旧 Token 重放返回 `401`。`POST /v1/auth/logout` 撤销当前 Refresh Token，成功返回 `204`。
+`POST /v1/auth/refresh` 成功后会撤销旧 Refresh Token 并返回新的 Token Pair；旧 Token 重放返回 `401`，并撤销同一 Token Family 中的所有后继 Token。`POST /v1/auth/logout` 撤销当前 Family，成功返回 `204`。
+
+非浏览器客户端可继续在 JSON Body 中传入 `refresh_token`。工作台则在登录时发送 `X-HireFlow-Client: browser`：服务端不在 JSON 中暴露长期凭据，而是设置 HttpOnly、SameSite=Strict 的 Refresh Cookie 和独立 CSRF Cookie。Cookie 续期/登出必须使用 `X-CSRF-Token` 回传 CSRF 值，否则返回 `403`。并发请求在浏览器内共用一个续期 Promise，避免多次轮换自我触发重放防护。
 
 ### 创建面试
 
@@ -90,8 +92,8 @@ Content-Type: application/json
 | --- | --- | --- | --- |
 | POST | `/v1/auth/bootstrap` | 公开 | 创建企业与首个 Owner，返回 Access/Refresh Token Pair。 |
 | POST | `/v1/auth/tokens` | 公开 | 企业 ID、邮箱、密码登录；失败统一 `401`。 |
-| POST | `/v1/auth/refresh` | 公开 | 原子撤销旧 Refresh Token 并轮换新 Token Pair；过期、撤销或重放返回 `401`。 |
-| POST | `/v1/auth/logout` | 公开 | 撤销指定 Refresh Token；成功返回 `204`。 |
+| POST | `/v1/auth/refresh` | 公开 | Body Token 或 Cookie+CSRF 模式原子换新；过期、撤销或重放返回 `401`。 |
+| POST | `/v1/auth/logout` | 公开 | 撤销指定 Refresh Token Family 并清理会话 Cookie；成功返回 `204`。 |
 | POST | `/v1/users` | Owner | 创建 Recruiter、Hiring Manager 或 Interviewer。 |
 | GET | `/v1/users` | Owner / Recruiter / Hiring Manager | 查询当前租户成员，供排期选择面试官。 |
 | POST | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 创建职位。 |

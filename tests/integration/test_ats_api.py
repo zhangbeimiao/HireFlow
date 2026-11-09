@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
+import jwt
 import pytest
 
 BASE_URL = os.getenv("HIREFLOW_INTEGRATION_BASE_URL")
@@ -99,13 +100,7 @@ def test_refresh_token_rotation_replay_and_logout(client: httpx.Client) -> None:
         expected=401,
         json={"refresh_token": issued["refresh_token"]},
     )
-    _request(
-        client,
-        "POST",
-        "/v1/auth/logout",
-        expected=204,
-        json={"refresh_token": rotated["refresh_token"]},
-    )
+    # Replaying any predecessor revokes its replacement family as well.
     _request(
         client,
         "POST",
@@ -114,8 +109,79 @@ def test_refresh_token_rotation_replay_and_logout(client: httpx.Client) -> None:
         json={"refresh_token": rotated["refresh_token"]},
     )
 
+    tenant_id = jwt.decode(
+        issued["access_token"], options={"verify_signature": False}
+    )["tenant_id"]
+    fresh = _request(
+        client,
+        "POST",
+        "/v1/auth/tokens",
+        expected=200,
+        json={
+            "tenant_id": tenant_id,
+            "email": f"owner.{suffix}@hireflow.demo",
+            "password": PASSWORD,
+        },
+    ).json()
+    _request(
+        client,
+        "POST",
+        "/v1/auth/logout",
+        expected=204,
+        json={"refresh_token": fresh["refresh_token"]},
+    )
+    _request(client, "POST", "/v1/auth/refresh", expected=401, json={"refresh_token": fresh["refresh_token"]})
+
     assert issued["refresh_token"] != rotated["refresh_token"]
     assert rotated["expires_in"] == 1800
+
+
+def test_browser_refresh_cookie_requires_csrf_and_never_exposes_secret(
+    client: httpx.Client,
+) -> None:
+    suffix = f"browser-session-{uuid4().hex[:10]}"
+    issued_response = _request(
+        client,
+        "POST",
+        "/v1/auth/bootstrap",
+        expected=201,
+        headers={"X-HireFlow-Client": "browser"},
+        json={
+            "tenant_name": f"Browser session {suffix}",
+            "owner": {
+                "email": f"owner.{suffix}@hireflow.demo",
+                "display_name": "Browser Session Owner",
+                "role": "owner",
+                "password": PASSWORD,
+            },
+        },
+    )
+    assert issued_response.json()["refresh_token"] is None
+    set_cookies = issued_response.headers.get_list("set-cookie")
+    assert any("hireflow_refresh=" in value and "HttpOnly" in value for value in set_cookies)
+    assert all("SameSite=strict" in value for value in set_cookies)
+
+    _request(client, "POST", "/v1/auth/refresh", expected=403)
+    csrf_token = client.cookies.get("hireflow_csrf")
+    assert csrf_token
+    refreshed = _request(
+        client,
+        "POST",
+        "/v1/auth/refresh",
+        expected=200,
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert refreshed.json()["refresh_token"] is None
+
+    rotated_csrf = client.cookies.get("hireflow_csrf")
+    _request(
+        client,
+        "POST",
+        "/v1/auth/logout",
+        expected=204,
+        headers={"X-CSRF-Token": rotated_csrf},
+    )
+    assert client.cookies.get("hireflow_csrf") is None
 
 
 def _new_application(client: httpx.Client, label: str) -> dict:

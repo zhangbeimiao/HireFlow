@@ -4,6 +4,7 @@ const errorBox = document.querySelector("#error");
 const toast = document.querySelector("#toast");
 const token = () => localStorage.getItem(tokenKey);
 const filePreview = window.location.protocol === "file:";
+let refreshPromise = null;
 
 if (filePreview) {
   document.body.classList.add("file-preview");
@@ -24,12 +25,53 @@ function showError(message) {
 
 function clearError() { errorBox.style.display = "none"; }
 
-async function api(path, options = {}) {
+function cookieValue(name) {
+  const prefix = `${encodeURIComponent(name)}=`;
+  const item = document.cookie.split("; ").find((value) => value.startsWith(prefix));
+  return item ? decodeURIComponent(item.slice(prefix.length)) : null;
+}
+
+function clearSession() {
+  localStorage.removeItem(tokenKey);
+  document.cookie = "hireflow_csrf=; Max-Age=0; Path=/; SameSite=Strict";
+  document.querySelector("#session-actions")?.classList.add("hidden");
+  document.querySelector("#open-auth").innerHTML = "连接团队 <span>→</span>";
+}
+
+async function refreshSession() {
+  if (!cookieValue("hireflow_csrf")) return false;
+  if (!refreshPromise) {
+    refreshPromise = (async () => {
+      const response = await fetch("/v1/auth/refresh", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "X-CSRF-Token": cookieValue("hireflow_csrf") || "" },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.access_token) {
+        clearSession();
+        return false;
+      }
+      localStorage.setItem(tokenKey, data.access_token);
+      return true;
+    })().finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+async function api(path, options = {}, allowRefresh = true) {
   const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
   if (token()) headers.Authorization = `Bearer ${token()}`;
-  const response = await fetch(path, { ...options, headers });
+  const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+  if (response.status === 401 && allowRefresh && token() && !path.startsWith("/v1/auth/")) {
+    if (await refreshSession()) return api(path, options, false);
+  }
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.detail || `请求失败（${response.status}）`);
+  if (!response.ok) {
+    const error = new Error(data.detail || `请求失败（${response.status}）`);
+    error.status = response.status;
+    throw error;
+  }
   return data;
 }
 
@@ -45,12 +87,13 @@ function renderOverview(data) {
 }
 
 async function loadOverview() {
-  if (!token()) return;
+  if (!token() && !(await refreshSession())) return;
   try {
     renderOverview(await api("/v1/dashboard/overview"));
     document.querySelector("#open-auth").innerHTML = "已连接 <span>✓</span>";
+    document.querySelector("#session-actions")?.classList.remove("hidden");
   } catch (error) {
-    localStorage.removeItem(tokenKey);
+    clearSession();
     showToast("登录已过期，请重新连接团队");
   }
 }
@@ -85,7 +128,11 @@ async function connect(action) {
       tenant_name: document.querySelector("#tenant-name").value.trim(),
       owner: { email: document.querySelector("#owner-email").value.trim(), display_name: document.querySelector("#owner-name").value.trim(), role: "owner", password: document.querySelector("#owner-password").value },
     };
-    const response = await api(action === "login" ? "/v1/auth/tokens" : "/v1/auth/bootstrap", { method: "POST", body: JSON.stringify(payload) });
+    const response = await api(action === "login" ? "/v1/auth/tokens" : "/v1/auth/bootstrap", {
+      method: "POST",
+      headers: { "X-HireFlow-Client": "browser" },
+      body: JSON.stringify(payload),
+    });
     localStorage.setItem(tokenKey, response.access_token);
     dialog.close();
     await loadOverview();
@@ -95,4 +142,17 @@ async function connect(action) {
 
 document.querySelector("#login-submit").addEventListener("click", () => connect("login"));
 document.querySelector("#bootstrap-submit").addEventListener("click", () => connect("bootstrap"));
+document.querySelector("#logout-submit").addEventListener("click", async () => {
+  try {
+    await api("/v1/auth/logout", {
+      method: "POST",
+      headers: { "X-CSRF-Token": cookieValue("hireflow_csrf") || "" },
+    }, false);
+  } catch (_) {
+    // Local state must still be cleared when the server-side session already expired.
+  }
+  clearSession();
+  dialog.close();
+  showToast("已安全退出当前会话");
+});
 loadOverview();

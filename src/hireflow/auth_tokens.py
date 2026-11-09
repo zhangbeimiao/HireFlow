@@ -8,7 +8,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hireflow.db import set_tenant_context
@@ -33,12 +33,15 @@ def _token_hash(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode()).hexdigest()
 
 
-def _new_token(tenant_id: UUID, user_id: UUID) -> tuple[str, RefreshToken]:
+def _new_token(
+    tenant_id: UUID, user_id: UUID, *, family_id: UUID | None = None
+) -> tuple[str, RefreshToken]:
     raw_token = f"{tenant_id}.{secrets.token_urlsafe(48)}"
     return raw_token, RefreshToken(
         id=uuid4(),
         tenant_id=tenant_id,
         user_id=user_id,
+        family_id=family_id or uuid4(),
         token_hash=_token_hash(raw_token),
         expires_at=datetime.now(UTC) + timedelta(days=refresh_token_days()),
     )
@@ -77,7 +80,25 @@ async def rotate_refresh_token(session: AsyncSession, raw_token: str) -> tuple[U
         )
         .with_for_update()
     )
-    if token is None or token.revoked_at is not None or token.expires_at <= now:
+    if token is None:
+        await session.rollback()
+        raise InvalidRefreshToken("invalid or expired refresh token")
+    if token.revoked_at is not None:
+        # A revoked token can only reappear through replay. Revoke every live
+        # descendant in the same family so a stolen predecessor cannot race a
+        # legitimate browser and leave the replacement session active.
+        await session.execute(
+            update(RefreshToken)
+            .where(
+                RefreshToken.tenant_id == tenant_id,
+                RefreshToken.family_id == token.family_id,
+                RefreshToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        await session.commit()
+        raise InvalidRefreshToken("refresh token replay detected")
+    if token.expires_at <= now:
         await session.rollback()
         raise InvalidRefreshToken("invalid or expired refresh token")
     user = await session.scalar(
@@ -87,7 +108,9 @@ async def rotate_refresh_token(session: AsyncSession, raw_token: str) -> tuple[U
         await session.rollback()
         raise InvalidRefreshToken("refresh token user no longer exists")
 
-    replacement_raw, replacement = _new_token(tenant_id, user.id)
+    replacement_raw, replacement = _new_token(
+        tenant_id, user.id, family_id=token.family_id
+    )
     session.add(replacement)
     await session.flush()
     token.revoked_at = now
@@ -110,5 +133,13 @@ async def revoke_refresh_token(session: AsyncSession, raw_token: str) -> None:
     if token is None or token.revoked_at is not None:
         await session.rollback()
         raise InvalidRefreshToken("invalid refresh token")
-    token.revoked_at = datetime.now(UTC)
+    await session.execute(
+        update(RefreshToken)
+        .where(
+            RefreshToken.tenant_id == tenant_id,
+            RefreshToken.family_id == token.family_id,
+            RefreshToken.revoked_at.is_(None),
+        )
+        .values(revoked_at=datetime.now(UTC))
+    )
     await session.commit()

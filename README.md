@@ -10,7 +10,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 
 ## 已实现能力
 
-- **多租户与权限**：短期 JWT 使用 `kid` 支持密钥轮换，不透明 Refresh Token 每次使用后原子撤销并换新；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，PostgreSQL RLS 作为跨租户数据隔离最终防线。
+- **多租户与权限**：短期 JWT 使用 `kid` 支持密钥轮换；浏览器通过 HttpOnly/SameSite Cookie 与双提交 CSRF 自动续期，Refresh Token 每次使用后原子换新，前代重放会撤销整个 Token Family；PostgreSQL RLS 作为跨租户数据隔离最终防线。
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
@@ -80,7 +80,7 @@ docker compose up --build -d
 python -m pip install -e ".[dev]"
 python -m ruff check src tests migrations
 python -m pytest -q
-# Docker Compose 已启动后运行 7 个黑盒 ATS/认证 API 集成测试
+# Docker Compose 已启动后运行 8 个黑盒 ATS/认证 API 集成测试
 $env:HIREFLOW_INTEGRATION_BASE_URL = "http://127.0.0.1:8000"
 python -m pytest -q -m integration tests/integration/test_ats_api.py
 
@@ -111,7 +111,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
-当前回归基线为 `51` 个 Python 单元测试、`7` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+当前回归基线为 `51` 个 Python 单元测试、`8` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
 
 | 脚本 | 验证结果 |
 | --- | --- |
