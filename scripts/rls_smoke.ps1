@@ -3,6 +3,26 @@ $ProgressPreference = "SilentlyContinue"
 $baseUrl = "http://localhost:8000"
 $runId = Get-Date -Format "yyyyMMddHHmmss"
 $password = "HireFlowRlsPassword!2026"
+$docker = "docker"
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    $candidateDocker = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+    if (-not (Test-Path $candidateDocker)) { throw "Docker CLI was not found. Start Docker Desktop first." }
+    $docker = $candidateDocker
+}
+
+# The full CI suite deliberately sends many bootstrap requests from one Docker host.
+# Remove only this ephemeral auth-test counter so RLS verification is independent of
+# earlier smoke-test ordering without weakening the production rate limit.
+$bootstrapRateLimitKeys = @(
+    & $docker compose exec -T redis redis-cli --scan --pattern "hireflow:rate-limit:POST:/v1/auth/bootstrap:*"
+)
+if ($LASTEXITCODE -ne 0) { throw "Could not enumerate bootstrap rate-limit fixture keys" }
+foreach ($key in $bootstrapRateLimitKeys) {
+    if (-not [string]::IsNullOrWhiteSpace($key)) {
+        & $docker compose exec -T redis redis-cli UNLINK $key | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not delete bootstrap rate-limit fixture key" }
+    }
+}
 
 function Invoke-HireFlowJson {
     param([string] $Path, [object] $Body, [hashtable] $Headers = @{})
@@ -24,12 +44,6 @@ function New-TenantCandidate {
 
 $candidateA = New-TenantCandidate "$runId-a"
 $candidateB = New-TenantCandidate "$runId-b"
-$docker = "docker"
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-    $candidateDocker = "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
-    if (-not (Test-Path $candidateDocker)) { throw "Docker CLI was not found. Start Docker Desktop first." }
-    $docker = $candidateDocker
-}
 
 function Invoke-RlsSql {
     param([string] $Sql)
