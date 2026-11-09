@@ -206,15 +206,7 @@ jobs:
 
       - name: Isolate API contract tests from earlier bootstrap rate-limit fixtures
         shell: pwsh
-        run: |
-          $keys = @(docker compose exec -T redis redis-cli --scan --pattern "hireflow:rate-limit:POST:/v1/auth/bootstrap:*")
-          if ($LASTEXITCODE -ne 0) { throw "Could not enumerate bootstrap rate-limit fixture keys" }
-          foreach ($key in $keys) {
-            if (-not [string]::IsNullOrWhiteSpace($key)) {
-              docker compose exec -T redis redis-cli UNLINK $key | Out-Null
-              if ($LASTEXITCODE -ne 0) { throw "Could not remove bootstrap rate-limit fixture key" }
-            }
-          }
+        run: ./scripts/reset_bootstrap_rate_limit.ps1
 
       - name: Verify ATS public API contracts with pytest
         env:
@@ -229,6 +221,10 @@ jobs:
       - name: Verify SMTP outage retry and recovery
         shell: pwsh
         run: ./scripts/email_failure_smoke.ps1
+
+      - name: Isolate security checks from earlier bootstrap rate-limit fixtures
+        shell: pwsh
+        run: ./scripts/reset_bootstrap_rate_limit.ps1
 
       - name: Verify authentication, RBAC, and tenant isolation
         shell: pwsh
