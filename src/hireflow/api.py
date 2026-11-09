@@ -262,6 +262,27 @@ async def workbench() -> FileResponse:
     return FileResponse(web_root / "index.html")
 
 
+@app.get("/app.css", include_in_schema=False)
+async def workbench_styles() -> FileResponse:
+    """Serve relative assets so index.html also works as a local static preview."""
+    return FileResponse(web_root / "app.css")
+
+
+@app.get("/operations.css", include_in_schema=False)
+async def workbench_operation_styles() -> FileResponse:
+    return FileResponse(web_root / "operations.css")
+
+
+@app.get("/app.js", include_in_schema=False)
+async def workbench_script() -> FileResponse:
+    return FileResponse(web_root / "app.js")
+
+
+@app.get("/operations.js", include_in_schema=False)
+async def workbench_operation_script() -> FileResponse:
+    return FileResponse(web_root / "operations.js")
+
+
 @app.get("/v1/dashboard/overview", response_model=DashboardOverviewRead)
 async def get_dashboard_overview(
     tenant_id: UUID = Depends(current_tenant), session: AsyncSession = Depends(tenant_session)

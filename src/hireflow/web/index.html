@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0a1020" />
     <title>HireFlow · 招聘运营台</title>
-    <link rel="stylesheet" href="/assets/app.css" />
-    <link rel="stylesheet" href="/assets/operations.css" />
+    <link rel="stylesheet" href="./app.css" />
+    <link rel="stylesheet" href="./operations.css" />
   </head>
   <body>
     <div class="app-shell">
@@ -25,13 +25,17 @@
       </aside>
 
       <main class="main">
+        <div class="preview-notice" id="preview-notice" role="status">
+          <span class="preview-notice-icon">i</span>
+          <span><strong>当前为静态预览</strong>启动 Docker 后访问 <a href="http://localhost:8000">localhost:8000</a> 使用完整招聘流程。</span>
+        </div>
         <header class="topbar">
           <div><p class="eyebrow">招聘工作台</p><h1>今天，招到对的人。</h1></div>
-          <div class="top-actions"><button class="icon-button" id="refresh" title="刷新数据">↻</button><button class="primary-button" id="open-auth">连接团队 <span>→</span></button></div>
+          <div class="top-actions"><span class="environment-chip"><i></i>本地安全环境</span><button class="icon-button" id="refresh" title="刷新数据">↻</button><button class="primary-button" id="open-auth">连接团队 <span>→</span></button></div>
         </header>
 
         <section class="hero-card" id="overview">
-          <div class="hero-copy"><span class="tag">SCHEDULING CONTROL</span><h2>将每一次面试，变成可靠的协作。</h2><p>由 PostgreSQL 保障排期一致性，由事件驱动通知闭环。登录后查看当前企业的真实招聘数据。</p><div class="hero-actions"><button class="primary-button" id="hero-auth">开始使用 <span>→</span></button><a class="text-link" href="/docs" target="_blank">查看接口能力 ↗</a></div></div>
+          <div class="hero-copy"><span class="tag">SCHEDULING CONTROL</span><h2>将每一次面试，<br />变成可靠的协作。</h2><p>由 PostgreSQL 保障排期一致性，由事件驱动通知闭环。登录后查看当前企业的真实招聘数据。</p><div class="hero-actions"><button class="primary-button" id="hero-auth">开始使用 <span>→</span></button><a class="text-link" href="/docs" target="_blank">查看接口能力 ↗</a></div><div class="hero-proof"><span>✓ 并发冲突保护</span><span>✓ 租户级数据隔离</span><span>✓ 可靠消息投递</span></div></div>
           <div class="orbit" aria-hidden="true"><div class="orbit-core">◎</div><span class="satellite one"></span><span class="satellite two"></span><span class="satellite three"></span></div>
         </section>
 
@@ -76,11 +80,11 @@
       </main>
     </div>
 
-    <dialog id="auth-dialog"><form method="dialog" class="auth-card"><button class="close" value="cancel" aria-label="关闭">×</button><p class="eyebrow">WELCOME TO HIREFLOW</p><h2>连接你的招聘团队</h2><div class="tabs"><button type="button" class="tab active" data-tab="login">登录已有团队</button><button type="button" class="tab" data-tab="bootstrap">创建演示团队</button></div><div id="error" role="alert"></div>
+    <dialog id="auth-dialog"><form method="dialog" class="auth-card"><button class="close" value="cancel" formnovalidate aria-label="关闭">×</button><p class="eyebrow">WELCOME TO HIREFLOW</p><h2>连接你的招聘团队</h2><div class="tabs"><button type="button" class="tab active" data-tab="login">登录已有团队</button><button type="button" class="tab" data-tab="bootstrap">创建演示团队</button></div><div id="error" role="alert"></div>
       <div class="form-view" id="login-view"><label>企业 ID<input id="login-tenant" placeholder="UUID" required /></label><label>邮箱<input id="login-email" type="email" placeholder="name@company.com" required /></label><label>密码<input id="login-password" type="password" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="login-submit">登录并进入工作台 <span>→</span></button><p class="form-hint">企业 ID 在初始化团队时生成；也可从演示脚本输出中获取。</p></div>
       <div class="form-view hidden" id="bootstrap-view"><label>企业名称<input id="tenant-name" placeholder="例如：Northstar Studio" required /></label><div class="field-row"><label>姓名<input id="owner-name" placeholder="招聘负责人" required /></label><label>邮箱<input id="owner-email" type="email" placeholder="owner@company.com" required /></label></div><label>设置密码<input id="owner-password" type="password" minlength="12" placeholder="至少 12 位" required /></label><button class="primary-button wide" type="button" id="bootstrap-submit">创建并进入工作台 <span>→</span></button><p class="form-hint">仅用于本地演示。Token 只保存在当前浏览器。</p></div>
     </form></dialog>
-    <dialog id="operation-dialog"><form method="dialog" class="operation-card"><button class="close" value="cancel" aria-label="关闭">×</button><p class="eyebrow" id="operation-kicker">QUICK ACTION</p><h2 id="operation-title">新建职位</h2><div id="operation-error" role="alert"></div>
+    <dialog id="operation-dialog"><form method="dialog" class="operation-card"><button class="close" value="cancel" formnovalidate aria-label="关闭">×</button><p class="eyebrow" id="operation-kicker">QUICK ACTION</p><h2 id="operation-title">新建职位</h2><div id="operation-error" role="alert"></div>
       <div class="operation-view" id="job-view"><label>职位名称<input id="job-title" placeholder="例如：后端开发工程师" /></label><label>招聘负责人（可选）<select id="job-manager"><option value="">暂不指定</option></select></label><button class="primary-button wide" type="button" id="job-submit">创建职位 <span>→</span></button></div>
       <div class="operation-view hidden" id="candidate-view"><div class="field-row"><label>姓名<input id="candidate-name" placeholder="候选人姓名" /></label><label>邮箱<input id="candidate-email" type="email" placeholder="candidate@email.com" /></label></div><label>手机号（可选）<input id="candidate-phone" placeholder="13800000000" /></label><button class="primary-button wide" type="button" id="candidate-submit">保存候选人 <span>→</span></button></div>
       <div class="operation-view hidden" id="schedule-view"><label>关联申请（可选）<select id="schedule-application"><option value="">不关联 ATS 申请</option></select></label><label>候选人<select id="schedule-candidate"></select></label><label>面试官<select id="schedule-interviewer"></select></label><label>关联职位<select id="schedule-job"></select></label><label>面试轮次（可选）<select id="schedule-round"><option value="">不指定轮次</option></select></label><div class="field-row"><label>可用开始<input id="availability-start" type="datetime-local" /></label><label>可用结束<input id="availability-end" type="datetime-local" /></label></div><button class="secondary-button" type="button" id="suggest-submit">保存双方可用时段并获取推荐</button><div class="field-row"><label>开始时间<input id="schedule-start" type="datetime-local" /></label><label>结束时间<input id="schedule-end" type="datetime-local" /></label></div><label>会议链接（可选）<input id="schedule-url" placeholder="https://meeting.example.com/..." /></label><div class="conflict-note">推荐时段不预占资源；提交时 PostgreSQL 排他约束进行最终冲突裁决，重叠排期返回 <code>409 Conflict</code>。</div><button class="primary-button wide" type="button" id="schedule-submit">确认安排面试 <span>→</span></button></div>
@@ -91,6 +95,6 @@
       <div class="operation-view hidden" id="offer-view"><label>Offer 阶段申请<select id="offer-application"></select></label><div class="field-row"><label>薪资金额（元）<input id="offer-salary" type="number" min="0" placeholder="30000" /></label><label>币种<input id="offer-currency" maxlength="3" value="CNY" /></label></div><div class="field-row"><label>入职日期<input id="offer-start-date" type="date" /></label><label>有效期至<input id="offer-expires" type="datetime-local" /></label></div><button class="primary-button wide" type="button" id="offer-submit">起草 Offer <span>→</span></button></div>
       <div class="operation-view hidden" id="offer-status-view"><label>Offer<select id="offer-status-offer"></select></label><label>目标状态<select id="offer-status-target"></select></label><div class="conflict-note">接受 Offer 后，关联申请自动进入 <code>hired</code>；所有变更写入审计与 Transactional Outbox。</div><button class="primary-button wide" type="button" id="offer-status-submit">确认更新 <span>→</span></button></div>
     </form></dialog>
-    <div id="toast" role="status"></div><script src="/assets/app.js"></script><script src="/assets/operations.js"></script>
+    <div id="toast" role="status"></div><script src="./app.js"></script><script src="./operations.js"></script>
   </body>
 </html>

@@ -3,6 +3,13 @@ const dialog = document.querySelector("#auth-dialog");
 const errorBox = document.querySelector("#error");
 const toast = document.querySelector("#toast");
 const token = () => localStorage.getItem(tokenKey);
+const filePreview = window.location.protocol === "file:";
+
+if (filePreview) {
+  document.body.classList.add("file-preview");
+  document.querySelectorAll('a[href="/docs"]').forEach((link) => { link.href = "http://localhost:8000/docs"; });
+  document.querySelectorAll('a[href="/metrics"]').forEach((link) => { link.href = "http://localhost:8000/metrics"; });
+}
 
 function showToast(message) {
   toast.textContent = message;
@@ -56,7 +63,14 @@ async function loadOverview() {
   }
 }
 
-function openAuth() { clearError(); dialog.showModal(); }
+function openAuth() {
+  if (filePreview) {
+    showToast("静态预览不可连接后端，请访问 localhost:8000");
+    return;
+  }
+  clearError();
+  dialog.showModal();
+}
 document.querySelector("#open-auth").addEventListener("click", openAuth);
 document.querySelector("#hero-auth").addEventListener("click", openAuth);
 document.querySelector("#refresh").addEventListener("click", async () => { await loadOverview(); showToast("数据已刷新"); });

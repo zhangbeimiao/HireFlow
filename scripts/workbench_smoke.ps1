@@ -7,8 +7,16 @@ $password = "HireFlowWorkbenchPassword!2026"
 
 $homeResponse = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/"
 $operations = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/assets/operations.js"
+$relativeAssets = @("app.css", "operations.css", "app.js", "operations.js")
+foreach ($asset in $relativeAssets) {
+    $assetResponse = Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$asset"
+    if ($assetResponse.StatusCode -ne 200) { throw "relative workbench asset failed: $asset" }
+}
 if ($homeResponse.Content -notmatch 'id="ats-detail"' -or $homeResponse.Content -notmatch 'id="notification-list"') {
     throw "workbench is missing ATS detail or notification panels"
+}
+if ($homeResponse.Content -notmatch 'href="\./app.css"' -or $homeResponse.Content -notmatch 'src="\./app.js"') {
+    throw "workbench does not support relative static-preview assets"
 }
 if ($operations.Content -notmatch 'data-application-detail' -or $operations.Content -notmatch 'audit-timeline') {
     throw "workbench assets are missing ATS detail and audit timeline behavior"
