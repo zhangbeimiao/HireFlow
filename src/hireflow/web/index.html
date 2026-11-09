@@ -54,27 +54,31 @@
         </section>
 
         <section class="record-grid">
-          <article class="panel record-panel" id="jobs"><div class="panel-head"><div><p class="eyebrow">OPEN ROLES</p><h3>招聘职位</h3></div><button class="mini-action" data-operation="job">＋ 新建</button></div><div id="job-list" class="record-list empty-state"><p>连接团队后显示职位</p></div></article>
-          <article class="panel record-panel" id="candidates"><div class="panel-head"><div><p class="eyebrow">PIPELINE</p><h3>候选人</h3></div><button class="mini-action" data-operation="candidate">＋ 录入</button></div><div id="candidate-list" class="record-list empty-state"><p>连接团队后显示候选人</p></div></article>
+          <article class="panel record-panel" id="jobs"><div class="panel-head"><div><p class="eyebrow">OPEN ROLES</p><h3>招聘职位</h3></div><button class="mini-action" data-operation="job">＋ 新建</button></div><div class="list-toolbar"><input id="job-search" type="search" placeholder="搜索职位" aria-label="搜索职位" /><select id="job-status-filter" aria-label="筛选职位状态"><option value="">全部状态</option><option value="open">开放</option><option value="closed">关闭</option></select></div><div id="job-list" class="record-list empty-state"><p>连接团队后显示职位</p></div><div class="pagination"><button id="job-prev" type="button">上一页</button><span id="job-page">第 1 页</span><button id="job-next" type="button">下一页</button></div></article>
+          <article class="panel record-panel" id="candidates"><div class="panel-head"><div><p class="eyebrow">TALENT POOL</p><h3>候选人</h3></div><button class="mini-action" data-operation="candidate">＋ 录入</button></div><div class="list-toolbar"><input id="candidate-search" type="search" placeholder="搜索姓名、邮箱或手机号" aria-label="搜索候选人" /></div><div id="candidate-list" class="record-list empty-state"><p>连接团队后显示候选人</p></div><div class="pagination"><button id="candidate-prev" type="button">上一页</button><span id="candidate-page">第 1 页</span><button id="candidate-next" type="button">下一页</button></div></article>
         </section>
 
-        <section class="record-grid" id="pipeline">
-          <article class="panel record-panel"><div class="panel-head"><div><p class="eyebrow">APPLICATION PIPELINE</p><h3>申请阶段</h3></div><div class="panel-actions"><button class="mini-action" data-operation="round">＋ 轮次</button><button class="mini-action" data-operation="application">＋ 申请</button></div></div><div id="application-list" class="record-list empty-state"><p>连接团队后显示申请流程</p></div></article>
-          <article class="panel record-panel"><div class="panel-head"><div><p class="eyebrow">OFFER MANAGEMENT</p><h3>Offer</h3></div><button class="mini-action" data-operation="offer">＋ 起草</button></div><div id="offer-list" class="record-list empty-state"><p>推进申请至 offer 阶段后可起草 Offer</p></div></article>
+        <section class="panel kanban-panel" id="pipeline">
+          <div class="panel-head"><div><p class="eyebrow">APPLICATION PIPELINE</p><h3>申请阶段看板</h3></div><div class="panel-actions"><button class="mini-action" data-operation="round">＋ 轮次</button><button class="mini-action" data-operation="application">＋ 申请</button></div></div>
+          <div class="list-toolbar pipeline-toolbar"><input id="application-search" type="search" placeholder="搜索候选人或职位" aria-label="搜索申请" /><select id="application-stage-filter" aria-label="筛选申请阶段"><option value="">全部阶段</option><option value="applied">已申请</option><option value="screening">筛选中</option><option value="interview">面试中</option><option value="offer">Offer</option><option value="hired">已录用</option><option value="rejected">已拒绝</option><option value="withdrawn">已撤回</option></select></div>
+          <div id="application-list" class="kanban-board empty-state"><p>连接团队后显示申请流程</p></div>
         </section>
 
-        <section class="panel ats-detail-panel hidden" id="ats-detail" aria-live="polite">
+        <section class="panel offer-panel"><div class="panel-head"><div><p class="eyebrow">OFFER MANAGEMENT</p><h3>Offer 管理</h3></div><button class="mini-action" data-operation="offer">＋ 起草</button></div><div id="offer-list" class="record-list empty-state"><p>推进申请至 offer 阶段后可起草 Offer</p></div></section>
+
+        <div class="drawer-backdrop hidden" id="detail-backdrop"></div>
+        <aside class="panel ats-detail-panel hidden" id="ats-detail" aria-live="polite" aria-label="招聘详情抽屉">
           <div class="panel-head"><div><p class="eyebrow" id="detail-kicker">ATS DETAIL</p><h3 id="detail-title">招聘流程详情</h3></div><button class="mini-action" id="detail-close" type="button">关闭</button></div>
           <div class="detail-grid"><div id="detail-summary" class="detail-summary"></div><div><p class="detail-section-title">审计时间线</p><div id="audit-timeline" class="audit-timeline"></div></div></div>
-        </section>
+        </aside>
 
         <section class="content-grid">
-          <article class="panel schedule-panel" id="schedule"><div class="panel-head"><div><p class="eyebrow">UP NEXT</p><h3>即将进行的面试</h3></div><div class="panel-actions"><button class="mini-action" data-operation="scorecard">填写评分卡</button><span class="live-dot">实时</span></div></div><div id="interview-list" class="empty-state"><span>◫</span><p>连接团队后显示近期面试</p></div></article>
+          <article class="panel schedule-panel" id="schedule"><div class="panel-head"><div><p class="eyebrow">INTERVIEW CALENDAR</p><h3>面试日历</h3></div><div class="panel-actions"><button class="mini-action" data-operation="scorecard">填写评分卡</button><span class="live-dot">实时</span></div></div><div class="calendar-toolbar"><button id="calendar-prev" type="button" aria-label="上一周">←</button><input id="calendar-date" type="date" aria-label="日历起始日期" /><button id="calendar-today" type="button">今天</button><button id="calendar-next" type="button" aria-label="下一周">→</button></div><div id="interview-list" class="calendar-grid empty-state"><span>◫</span><p>连接团队后显示近期面试</p></div></article>
           <article class="panel reliability-panel"><div class="panel-head"><div><p class="eyebrow">SYSTEM STATUS</p><h3>可靠性护栏</h3></div><span class="status-ok">● 运行中</span></div><div class="guard"><span class="guard-number">01</span><div><strong>排期冲突保护</strong><p>PostgreSQL 排他约束作为最终裁决。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">02</span><div><strong>事件通知闭环</strong><p>Outbox、重试队列与幂等消费。</p></div><span class="guard-check">✓</span></div><div class="guard"><span class="guard-number">03</span><div><strong>多租户访问控制</strong><p>JWT 签名声明与 RBAC 权限校验。</p></div><span class="guard-check">✓</span></div><a class="panel-link" href="/metrics" target="_blank">打开 Prometheus 指标 ↗</a></article>
         </section>
 
         <section class="panel notification-panel" id="notifications">
-          <div class="panel-head"><div><p class="eyebrow">EVENT DELIVERY</p><h3>通知中心</h3></div><span class="live-dot">异步投递</span></div>
+          <div class="panel-head"><div><p class="eyebrow">EVENT DELIVERY</p><h3>通知中心</h3></div><div class="panel-actions"><button class="mini-action" id="notification-read-all" type="button">全部已读</button><span class="live-dot">异步投递</span></div></div>
           <div id="notification-list" class="record-list empty-state"><p>连接团队后显示站内通知</p></div>
         </section>
       </main>

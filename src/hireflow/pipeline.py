@@ -7,7 +7,7 @@ audit record and Outbox event are committed together.
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, tuple_, update
+from sqlalchemy import or_, select, tuple_, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,7 @@ from hireflow.domain import (
 from hireflow.models import (
     Application,
     ApplicationAudit,
+    Candidate,
     Interview,
     InterviewRound,
     InterviewScorecard,
@@ -66,8 +67,25 @@ async def list_applications(
     *,
     limit: int,
     cursor: PageCursor | None = None,
+    stage: ApplicationStage | None = None,
+    job_id: UUID | None = None,
+    candidate_id: UUID | None = None,
+    query_text: str | None = None,
 ) -> list[Application]:
     query = select(Application).where(Application.tenant_id == tenant_id)
+    if stage is not None:
+        query = query.where(Application.stage == stage.value)
+    if job_id is not None:
+        query = query.where(Application.job_id == job_id)
+    if candidate_id is not None:
+        query = query.where(Application.candidate_id == candidate_id)
+    if query_text:
+        pattern = f"%{query_text.strip()}%"
+        query = (
+            query.join(Candidate, Candidate.id == Application.candidate_id)
+            .join(Job, Job.id == Application.job_id)
+            .where(or_(Candidate.full_name.ilike(pattern), Job.title.ilike(pattern)))
+        )
     if cursor is not None:
         query = query.where(
             tuple_(Application.created_at, Application.id) < (cursor.created_at, cursor.item_id)

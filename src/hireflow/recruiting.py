@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,9 +113,19 @@ async def create_job(session: AsyncSession, tenant_id: UUID, payload: JobCreate)
 
 
 async def list_jobs(
-    session: AsyncSession, tenant_id: UUID, *, limit: int, cursor: PageCursor | None = None
+    session: AsyncSession,
+    tenant_id: UUID,
+    *,
+    limit: int,
+    cursor: PageCursor | None = None,
+    query_text: str | None = None,
+    status: str | None = None,
 ) -> list[Job]:
     query = select(Job).where(Job.tenant_id == tenant_id)
+    if query_text:
+        query = query.where(Job.title.ilike(f"%{query_text.strip()}%"))
+    if status:
+        query = query.where(Job.status == status)
     if cursor is not None:
         query = query.where(tuple_(Job.created_at, Job.id) < (cursor.created_at, cursor.item_id))
     rows = await session.scalars(
@@ -155,9 +165,23 @@ async def create_candidate(
 
 
 async def list_candidates(
-    session: AsyncSession, tenant_id: UUID, *, limit: int, cursor: PageCursor | None = None
+    session: AsyncSession,
+    tenant_id: UUID,
+    *,
+    limit: int,
+    cursor: PageCursor | None = None,
+    query_text: str | None = None,
 ) -> list[Candidate]:
     query = select(Candidate).where(Candidate.tenant_id == tenant_id)
+    if query_text:
+        pattern = f"%{query_text.strip()}%"
+        query = query.where(
+            or_(
+                Candidate.full_name.ilike(pattern),
+                Candidate.email.ilike(pattern),
+                Candidate.phone.ilike(pattern),
+            )
+        )
     if cursor is not None:
         query = query.where(
             tuple_(Candidate.created_at, Candidate.id) < (cursor.created_at, cursor.item_id)

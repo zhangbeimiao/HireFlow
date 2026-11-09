@@ -1,7 +1,7 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -10,7 +10,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from fastapi.responses import FileResponse, JSONResponse
 from prometheus_client import make_asgi_app
 from redis.asyncio import Redis
-from sqlalchemy import select, tuple_
+from sqlalchemy import select, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
@@ -24,6 +24,7 @@ from hireflow.availability import (
 from hireflow.cache import cached_list, invalidate_cached_list
 from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session, get_tenant_session, tenant_session_scope
+from hireflow.domain import ApplicationStage, InterviewStatus
 from hireflow.health import postgres_ready, readiness_response, redis_ready
 from hireflow.models import Base, Interview, Notification, NotificationInbox, User
 from hireflow.notifications import request_replay
@@ -359,6 +360,8 @@ async def get_jobs(
     response: Response,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+    status_filter: str | None = Query(default=None, alias="status", max_length=30),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
@@ -368,7 +371,14 @@ async def get_jobs(
 
     async def load_jobs():
         async with tenant_session_scope(tenant_id) as session:
-            rows = await list_jobs(session, tenant_id, limit=limit, cursor=page_cursor)
+            rows = await list_jobs(
+                session,
+                tenant_id,
+                limit=limit,
+                cursor=page_cursor,
+                query_text=q,
+                status=status_filter,
+            )
             return [
                 JobRead.model_validate(row, from_attributes=True).model_dump(mode="json")
                 for row in rows
@@ -385,6 +395,8 @@ async def get_jobs(
             "no-cache" in request.headers.get("Cache-Control", "").lower()
             or page_cursor is not None
             or limit != DEFAULT_PAGE_SIZE
+            or q is not None
+            or status_filter is not None
         ),
     )
     response.headers["X-Cache"] = result.outcome
@@ -436,6 +448,7 @@ async def get_candidates(
     response: Response,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
+    q: str | None = Query(default=None, min_length=1, max_length=120),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
@@ -445,7 +458,9 @@ async def get_candidates(
 
     async def load_candidates():
         async with tenant_session_scope(tenant_id) as session:
-            rows = await list_candidates(session, tenant_id, limit=limit, cursor=page_cursor)
+            rows = await list_candidates(
+                session, tenant_id, limit=limit, cursor=page_cursor, query_text=q
+            )
             return [
                 CandidateRead.model_validate(row, from_attributes=True).model_dump(mode="json")
                 for row in rows
@@ -462,6 +477,7 @@ async def get_candidates(
             "no-cache" in request.headers.get("Cache-Control", "").lower()
             or page_cursor is not None
             or limit != DEFAULT_PAGE_SIZE
+            or q is not None
         ),
     )
     response.headers["X-Cache"] = result.outcome
@@ -509,6 +525,10 @@ async def get_applications(
     response: Response,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
+    q: str | None = Query(default=None, min_length=1, max_length=120),
+    stage: ApplicationStage | None = Query(default=None),
+    job_id: UUID | None = Query(default=None),
+    candidate_id: UUID | None = Query(default=None),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
@@ -516,7 +536,14 @@ async def get_applications(
     session: AsyncSession = Depends(tenant_session),
 ):
     rows = await list_applications(
-        session, tenant_id, limit=limit, cursor=_decode_page_cursor(cursor)
+        session,
+        tenant_id,
+        limit=limit,
+        cursor=_decode_page_cursor(cursor),
+        query_text=q,
+        stage=stage,
+        job_id=job_id,
+        candidate_id=candidate_id,
     )
     return _page_response(rows, limit, response)
 
@@ -673,6 +700,9 @@ async def get_interviews(
     response: Response,
     limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     cursor: str | None = Query(default=None, max_length=512),
+    starts_after: datetime | None = Query(default=None),
+    starts_before: datetime | None = Query(default=None),
+    status_filter: InterviewStatus | None = Query(default=None, alias="status"),
     tenant_id: UUID = Depends(current_tenant),
     _: Principal = Depends(
         require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
@@ -680,7 +710,15 @@ async def get_interviews(
     session: AsyncSession = Depends(tenant_session),
 ) -> list[DashboardInterviewRead]:
     page_cursor = _decode_page_cursor(cursor)
-    rows = await list_interviews(session, tenant_id, limit=limit, cursor=page_cursor)
+    rows = await list_interviews(
+        session,
+        tenant_id,
+        limit=limit,
+        cursor=page_cursor,
+        starts_after=starts_after,
+        starts_before=starts_before,
+        status=status_filter,
+    )
     return _page_response(rows, limit, response, timestamp_field="starts_at")
 
 
@@ -742,7 +780,9 @@ async def save_scorecard(
     interview_id: UUID,
     payload: ScorecardUpsert,
     tenant_id: UUID = Depends(current_tenant),
-    principal: Principal = Depends(require_roles(UserRole.INTERVIEWER, UserRole.HIRING_MANAGER)),
+    principal: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.INTERVIEWER, UserRole.HIRING_MANAGER)
+    ),
     session: AsyncSession = Depends(tenant_session),
 ):
     try:
@@ -839,6 +879,45 @@ async def list_notifications(
         query.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit + 1)
     )
     return _page_response(list(rows), limit, response)
+
+
+@app.patch("/v1/notifications/{notification_id}/read", response_model=NotificationRead)
+async def mark_notification_read(
+    notification_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    notification = await session.scalar(
+        select(Notification).where(
+            Notification.id == notification_id, Notification.tenant_id == tenant_id
+        )
+    )
+    if notification is None:
+        raise HTTPException(status_code=404, detail="notification not found")
+    if notification.read_at is None:
+        notification.read_at = datetime.now(UTC)
+        await session.commit()
+    return notification
+
+
+@app.post("/v1/notifications/read-all")
+async def mark_all_notifications_read(
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+):
+    result = await session.execute(
+        update(Notification)
+        .where(Notification.tenant_id == tenant_id, Notification.read_at.is_(None))
+        .values(read_at=datetime.now(UTC))
+    )
+    await session.commit()
+    return {"updated": result.rowcount or 0}
 
 
 @app.get("/v1/admin/notification-failures", response_model=list[NotificationFailureRead])

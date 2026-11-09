@@ -1,6 +1,7 @@
 const operationDialog = document.querySelector("#operation-dialog");
 const operationError = document.querySelector("#operation-error");
 const operationState = { jobs: [], candidates: [], users: [], applications: [], offers: [], interviews: [], notifications: [], rounds: [] };
+const viewState = { jobPage: 1, candidatePage: 1, pageSize: 4, calendarStart: startOfWeek(new Date()) };
 
 const applicationTransitions = {
   applied: ["screening", "rejected", "withdrawn"],
@@ -32,6 +33,9 @@ function byId(items, id) { return items.find((item) => item.id === id); }
 function jobName(id) { return byId(operationState.jobs, id)?.title || id; }
 function candidateName(id) { return byId(operationState.candidates, id)?.full_name || id; }
 function selectOptions(items, label) { return items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join(""); }
+function startOfWeek(value) { const date = new Date(value); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() - ((date.getDay() + 6) % 7)); return date; }
+function dateKey(value) { const date = new Date(value); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`; }
+function localDateInput(value) { return dateKey(value); }
 
 async function refreshOperationState() {
   const resources = [
@@ -132,19 +136,51 @@ async function completeOperation(successMessage, action) {
   }
 }
 
-function renderSimpleRecords(target, items, primary, secondary) {
+function renderSimpleRecords(target, items, primary, secondary, pageKey, pageLabel) {
   const container = document.querySelector(target);
   if (!items.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无数据，使用上方快捷操作开始创建。</p>"; return; }
+  const totalPages = Math.max(1, Math.ceil(items.length / viewState.pageSize));
+  viewState[pageKey] = Math.min(viewState[pageKey], totalPages);
+  const start = (viewState[pageKey] - 1) * viewState.pageSize;
   container.className = "record-list";
-  container.innerHTML = items.slice(0, 5).map((item) => `<div class="record-row"><span><strong>${escapeHtml(primary(item))}</strong><small>${escapeHtml(secondary(item))}</small></span><b>›</b></div>`).join("");
+  container.innerHTML = items.slice(start, start + viewState.pageSize).map((item) => `<div class="record-row"><span><strong>${escapeHtml(primary(item))}</strong><small>${escapeHtml(secondary(item))}</small></span><b>›</b></div>`).join("");
+  document.querySelector(`#${pageLabel}-page`).textContent = `第 ${viewState[pageKey]} / ${totalPages} 页`;
+  document.querySelector(`#${pageLabel}-prev`).disabled = viewState[pageKey] <= 1;
+  document.querySelector(`#${pageLabel}-next`).disabled = viewState[pageKey] >= totalPages;
+}
+
+function filteredJobs() {
+  const q = document.querySelector("#job-search").value.trim().toLowerCase();
+  const status = document.querySelector("#job-status-filter").value;
+  return operationState.jobs.filter((item) => (!q || item.title.toLowerCase().includes(q)) && (!status || item.status === status));
+}
+
+function filteredCandidates() {
+  const q = document.querySelector("#candidate-search").value.trim().toLowerCase();
+  return operationState.candidates.filter((item) => !q || [item.full_name, item.email, item.phone].some((value) => String(value || "").toLowerCase().includes(q)));
+}
+
+function renderDirectoryLists() {
+  renderSimpleRecords("#job-list", filteredJobs(), (job) => job.title, (job) => `状态：${job.status}`, "jobPage", "job");
+  renderSimpleRecords("#candidate-list", filteredCandidates(), (candidate) => candidate.full_name, (candidate) => candidate.email, "candidatePage", "candidate");
 }
 
 function renderPipeline() {
   const container = document.querySelector("#application-list");
-  if (!operationState.applications.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无申请，关联职位与候选人后启动流程。</p>"; }
+  const q = document.querySelector("#application-search").value.trim().toLowerCase();
+  const selectedStage = document.querySelector("#application-stage-filter").value;
+  const applications = operationState.applications.filter((item) => {
+    const matchesQuery = !q || candidateName(item.candidate_id).toLowerCase().includes(q) || jobName(item.job_id).toLowerCase().includes(q);
+    return matchesQuery && (!selectedStage || item.stage === selectedStage);
+  });
+  if (!operationState.applications.length) { container.className = "kanban-board empty-state"; container.innerHTML = "<p>暂无申请，关联职位与候选人后启动流程。</p>"; }
   else {
-    container.className = "record-list";
-    container.innerHTML = operationState.applications.map((item) => `<div class="record-row"><span><strong>${escapeHtml(candidateName(item.candidate_id))}<em class="stage-pill">${escapeHtml(stageNames[item.stage])}</em></strong><small>${escapeHtml(jobName(item.job_id))} · v${item.version} · ${escapeHtml(new Date(item.updated_at).toLocaleString("zh-CN"))}</small></span><span class="record-actions"><button class="record-action" data-application-detail="${item.id}">详情</button>${applicationTransitions[item.stage].length ? `<button class="record-action" data-advance="${item.id}">推进</button>` : ""}</span></div>`).join("");
+    container.className = "kanban-board";
+    const stages = selectedStage ? [selectedStage] : Object.keys(stageNames);
+    container.innerHTML = stages.map((stage) => {
+      const items = applications.filter((item) => item.stage === stage);
+      return `<section class="kanban-column" data-stage="${stage}"><header><span>${escapeHtml(stageNames[stage])}</span><b>${items.length}</b></header><div class="kanban-cards">${items.length ? items.map((item) => `<article class="kanban-card"><button data-application-detail="${item.id}"><strong>${escapeHtml(candidateName(item.candidate_id))}</strong><small>${escapeHtml(jobName(item.job_id))}</small><time>${escapeHtml(new Date(item.updated_at).toLocaleDateString("zh-CN"))}</time></button>${applicationTransitions[item.stage].length ? `<button class="kanban-advance" data-advance="${item.id}">推进 →</button>` : ""}</article>`).join("") : '<p class="kanban-empty">暂无申请</p>'}</div></section>`;
+    }).join("");
   }
   const offers = document.querySelector("#offer-list");
   if (!operationState.offers.length) { offers.className = "record-list empty-state"; offers.innerHTML = "<p>暂无 Offer，申请进入 Offer 阶段后可起草。</p>"; return; }
@@ -156,7 +192,19 @@ function renderNotifications() {
   const container = document.querySelector("#notification-list");
   if (!operationState.notifications.length) { container.className = "record-list empty-state"; container.innerHTML = "<p>暂无通知；业务事件消费后会在这里展示。</p>"; return; }
   container.className = "record-list notification-list";
-  container.innerHTML = operationState.notifications.map((item) => `<div class="notification-row ${item.read_at ? "" : "unread"}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content)}</small></span><time>${escapeHtml(new Date(item.created_at).toLocaleString("zh-CN"))}</time></div>`).join("");
+  container.innerHTML = operationState.notifications.map((item) => `<div class="notification-row ${item.read_at ? "" : "unread"}"><span class="notification-dot"></span><span><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.content)}</small></span><span class="notification-meta"><time>${escapeHtml(new Date(item.created_at).toLocaleString("zh-CN"))}</time>${item.read_at ? '<em>已读</em>' : `<button type="button" data-notification-read="${item.id}">标为已读</button>`}</span></div>`).join("");
+}
+
+function renderInterviewCalendar() {
+  const container = document.querySelector("#interview-list");
+  document.querySelector("#calendar-date").value = localDateInput(viewState.calendarStart);
+  const days = Array.from({ length: 7 }, (_, index) => { const day = new Date(viewState.calendarStart); day.setDate(day.getDate() + index); return day; });
+  container.className = "calendar-grid";
+  container.innerHTML = days.map((day) => {
+    const items = operationState.interviews.filter((item) => dateKey(item.starts_at) === dateKey(day));
+    const isToday = dateKey(day) === dateKey(new Date());
+    return `<section class="calendar-day ${isToday ? "today" : ""}"><header><span>${new Intl.DateTimeFormat("zh-CN", { weekday: "short" }).format(day)}</span><strong>${day.getDate()}</strong></header><div>${items.length ? items.map((item) => `<button class="calendar-event" data-interview-detail="${item.id}"><time>${new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(new Date(item.starts_at))}</time><strong>${escapeHtml(item.candidate_name)}</strong><small>${escapeHtml(item.job_title)}</small></button>`).join("") : '<p class="calendar-empty">无面试</p>'}</div></section>`;
+  }).join("");
 }
 
 function detailField(label, value) { return `<div class="detail-field"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value ?? "—")}</strong></div>`; }
@@ -172,7 +220,14 @@ function openDetailPanel(kicker, title, summary, timeline) {
   document.querySelector("#audit-timeline").innerHTML = timeline;
   const panel = document.querySelector("#ats-detail");
   panel.classList.remove("hidden");
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector("#detail-backdrop").classList.remove("hidden");
+  document.body.classList.add("drawer-open");
+}
+
+function closeDetailPanel() {
+  document.querySelector("#ats-detail").classList.add("hidden");
+  document.querySelector("#detail-backdrop").classList.add("hidden");
+  document.body.classList.remove("drawer-open");
 }
 
 async function showApplicationDetail(applicationId) {
@@ -208,10 +263,10 @@ async function loadRecords() {
   if (!operationToken()) return;
   try {
     await refreshOperationState();
-    renderSimpleRecords("#job-list", operationState.jobs, (job) => job.title, (job) => `状态：${job.status}`);
-    renderSimpleRecords("#candidate-list", operationState.candidates, (candidate) => candidate.full_name, (candidate) => candidate.email);
+    renderDirectoryLists();
     renderPipeline();
     renderNotifications();
+    renderInterviewCalendar();
   } catch (_) { /* dashboard handles expired sessions */ }
 }
 
@@ -222,13 +277,40 @@ document.addEventListener("click", (event) => {
   const applicationDetail = event.target.closest("[data-application-detail]");
   const offerDetail = event.target.closest("[data-offer-detail]");
   const interviewDetail = event.target.closest("[data-interview-detail]");
+  const notificationRead = event.target.closest("[data-notification-read]");
   if (advance) openOperation("stage", advance.dataset.advance);
   if (offerAction) openOperation("offer-status", offerAction.dataset.offerAction);
   if (applicationDetail) showApplicationDetail(applicationDetail.dataset.applicationDetail);
   if (offerDetail) showOfferDetail(offerDetail.dataset.offerDetail);
   if (interviewDetail) showInterviewDetail(interviewDetail.dataset.interviewDetail);
+  if (notificationRead) {
+    operationApi(`/v1/notifications/${notificationRead.dataset.notificationRead}/read`, { method: "PATCH" })
+      .then(() => Promise.all([loadOverview(), loadRecords()]))
+      .then(() => operationToast("通知已标记为已读"))
+      .catch((error) => operationToast(error.message));
+  }
 });
-document.querySelector("#detail-close").addEventListener("click", () => document.querySelector("#ats-detail").classList.add("hidden"));
+document.querySelector("#detail-close").addEventListener("click", closeDetailPanel);
+document.querySelector("#detail-backdrop").addEventListener("click", closeDetailPanel);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeDetailPanel(); });
+
+[["job-search", "input"], ["job-status-filter", "change"]].forEach(([id, name]) => document.querySelector(`#${id}`).addEventListener(name, () => { viewState.jobPage = 1; renderDirectoryLists(); }));
+document.querySelector("#candidate-search").addEventListener("input", () => { viewState.candidatePage = 1; renderDirectoryLists(); });
+[["job-prev", -1], ["job-next", 1]].forEach(([id, delta]) => document.querySelector(`#${id}`).addEventListener("click", () => { viewState.jobPage += delta; renderDirectoryLists(); }));
+[["candidate-prev", -1], ["candidate-next", 1]].forEach(([id, delta]) => document.querySelector(`#${id}`).addEventListener("click", () => { viewState.candidatePage += delta; renderDirectoryLists(); }));
+document.querySelector("#application-search").addEventListener("input", renderPipeline);
+document.querySelector("#application-stage-filter").addEventListener("change", renderPipeline);
+document.querySelector("#calendar-date").addEventListener("change", (event) => { viewState.calendarStart = startOfWeek(new Date(`${event.target.value}T00:00:00`)); renderInterviewCalendar(); });
+document.querySelector("#calendar-prev").addEventListener("click", () => { viewState.calendarStart.setDate(viewState.calendarStart.getDate() - 7); renderInterviewCalendar(); });
+document.querySelector("#calendar-next").addEventListener("click", () => { viewState.calendarStart.setDate(viewState.calendarStart.getDate() + 7); renderInterviewCalendar(); });
+document.querySelector("#calendar-today").addEventListener("click", () => { viewState.calendarStart = startOfWeek(new Date()); renderInterviewCalendar(); });
+document.querySelector("#notification-read-all").addEventListener("click", async () => {
+  try {
+    const result = await operationApi("/v1/notifications/read-all", { method: "POST" });
+    await Promise.all([loadOverview(), loadRecords()]);
+    operationToast(`${result.updated} 条通知已标记为已读`);
+  } catch (error) { operationToast(error.message); }
+});
 
 document.querySelector("#job-submit").addEventListener("click", () => completeOperation("职位已创建", () => operationApi("/v1/jobs", { method: "POST", body: JSON.stringify({ title: document.querySelector("#job-title").value.trim(), hiring_manager_id: document.querySelector("#job-manager").value || null }) })));
 document.querySelector("#candidate-submit").addEventListener("click", () => completeOperation("候选人已录入", () => operationApi("/v1/candidates", { method: "POST", body: JSON.stringify({ full_name: document.querySelector("#candidate-name").value.trim(), email: document.querySelector("#candidate-email").value.trim(), phone: document.querySelector("#candidate-phone").value.trim() || null }) })));

@@ -1,3 +1,4 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import and_, select, tuple_, update
@@ -224,6 +225,9 @@ async def list_interviews(
     *,
     limit: int,
     cursor: PageCursor | None = None,
+    starts_after: datetime | None = None,
+    starts_before: datetime | None = None,
+    status: InterviewStatus | None = None,
 ) -> list[DashboardInterviewRead]:
     query = (
         select(Interview, Candidate.full_name, User.display_name, Job.title)
@@ -232,6 +236,12 @@ async def list_interviews(
         .join(Job, Job.id == Interview.job_id)
         .where(Interview.tenant_id == tenant_id)
     )
+    if starts_after is not None:
+        query = query.where(Interview.starts_at >= starts_after)
+    if starts_before is not None:
+        query = query.where(Interview.starts_at < starts_before)
+    if status is not None:
+        query = query.where(Interview.status == status.value)
     if cursor is not None:
         query = query.where(
             tuple_(Interview.starts_at, Interview.id) < (cursor.created_at, cursor.item_id)

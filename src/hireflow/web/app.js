@@ -42,14 +42,6 @@ function renderOverview(data) {
   document.querySelector("#candidates").textContent = data.candidates;
   document.querySelector("#upcoming").textContent = data.upcoming_interviews;
   document.querySelector("#unread-notifications").textContent = data.unread_notifications;
-  const list = document.querySelector("#interview-list");
-  if (!data.upcoming.length) {
-    list.className = "empty-state";
-    list.innerHTML = "<span>◫</span><p>暂无待进行面试，先为候选人创建可用时段。</p>";
-    return;
-  }
-  list.className = "";
-  list.innerHTML = data.upcoming.map((item) => `<div class="interview-row"><span class="interview-time">${fmtTime(item.starts_at)}</span><div class="interview-main"><strong>${item.candidate_name}</strong><p>${item.job_title} · 面试官 ${item.interviewer_name}</p></div><span class="interview-actions"><span class="status-pill">${item.status}</span><button class="record-action" data-interview-detail="${item.id}">详情</button></span></div>`).join("");
 }
 
 async function loadOverview() {

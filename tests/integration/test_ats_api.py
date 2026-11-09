@@ -9,6 +9,7 @@ boundaries through the public HTTP API.
 from __future__ import annotations
 
 import os
+import time
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -354,3 +355,50 @@ def test_cross_tenant_cannot_observe_or_mutate_application(client: httpx.Client)
     )
 
     assert application["id"] not in {item["id"] for item in visible}
+
+
+def test_directory_filters_and_notification_read_state(client: httpx.Client) -> None:
+    context = _new_application(client, "filters")
+    headers = context["headers"]
+
+    jobs = _request(
+        client, "GET", "/v1/jobs?q=Backend%20Engineer&status=open", expected=200, headers=headers
+    ).json()
+    candidates = _request(
+        client, "GET", "/v1/candidates?q=API%20Candidate", expected=200, headers=headers
+    ).json()
+    applications = _request(
+        client, "GET", "/v1/applications?stage=applied&q=API", expected=200, headers=headers
+    ).json()
+
+    assert context["job"]["id"] in {item["id"] for item in jobs}
+    assert context["candidate"]["id"] in {item["id"] for item in candidates}
+    assert context["application"]["id"] in {item["id"] for item in applications}
+    assert _request(
+        client, "GET", "/v1/applications?stage=hired", expected=200, headers=headers
+    ).json() == []
+
+    notifications: list[dict] = []
+    for _ in range(20):
+        notifications = _request(
+            client, "GET", "/v1/notifications", expected=200, headers=headers
+        ).json()
+        if notifications:
+            break
+        time.sleep(0.25)
+    assert notifications, "expected the Outbox notification consumer to create a notification"
+
+    unread = next(item for item in notifications if item["read_at"] is None)
+    marked = _request(
+        client,
+        "PATCH",
+        f"/v1/notifications/{unread['id']}/read",
+        expected=200,
+        headers=headers,
+    ).json()
+    assert marked["read_at"] is not None
+
+    result = _request(
+        client, "POST", "/v1/notifications/read-all", expected=200, headers=headers
+    ).json()
+    assert result["updated"] >= 0

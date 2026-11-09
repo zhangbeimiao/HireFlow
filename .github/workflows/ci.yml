@@ -177,6 +177,14 @@ jobs:
         shell: pwsh
         run: ./scripts/ats_smoke.ps1
 
+      - name: Install Playwright Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Verify recruiting workbench end to end
+        env:
+          HIREFLOW_E2E_BASE_URL: http://127.0.0.1:8000
+        run: python -m pytest -q -m e2e tests/e2e
+
       - name: Verify ATS public API contracts with pytest
         env:
           HIREFLOW_INTEGRATION_BASE_URL: http://127.0.0.1:8000
