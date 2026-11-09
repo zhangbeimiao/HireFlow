@@ -154,6 +154,10 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.tls.example.yml config --quiet
 
+      - name: Verify PostgreSQL and RabbitMQ with ephemeral certificates
+        shell: pwsh
+        run: ./scripts/tls_smoke.ps1
+
       - name: Start full application stack
         run: docker compose up --build -d --wait --wait-timeout 90
 

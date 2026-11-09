@@ -6,6 +6,7 @@
 - `docker-compose.test.yml` shortens token/cache lifetimes and makes asynchronous checks converge faster.
 - `docker-compose.prod.yml` removes host-published data-plane ports, disables Mailpit unless its profile is explicitly enabled, requires rolling JWT keys and points email at an external SMTP provider.
 - `docker-compose.tls.example.yml` shows certificate mounts and PostgreSQL/RabbitMQ TLS wiring. It is an example, not a source of certificates.
+- `scripts/tls_smoke.ps1` creates a short-lived CA plus server/client certificates in isolated Docker volumes, verifies a PostgreSQL `verify-full` query and a RabbitMQ mutual-TLS handshake, then removes only the validated acceptance project and its ephemeral volumes.
 
 Production startup should use an ingress for HTTPS and an external secret manager:
 

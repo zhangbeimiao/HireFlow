@@ -1,0 +1,101 @@
+services:
+  certgen:
+    image: rabbitmq:3.13-management-alpine
+    entrypoint: ["/bin/sh", "/scripts/generate_tls_certs.sh"]
+    volumes:
+      - ./scripts/generate_tls_certs.sh:/scripts/generate_tls_certs.sh:ro
+      - postgres_tls:/postgres
+      - rabbitmq_tls:/rabbitmq
+      - client_tls:/client
+
+  postgres-tls:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: hireflow_tls
+      POSTGRES_USER: hireflow
+      POSTGRES_PASSWORD: hireflow_tls_only
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/tls/server.crt
+      - -c
+      - ssl_key_file=/run/tls/server.key
+      - -c
+      - ssl_ca_file=/run/tls/ca.crt
+    volumes:
+      - postgres_tls:/run/tls:ro
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hireflow -d hireflow_tls"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq-tls:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: hireflow
+      RABBITMQ_DEFAULT_PASS: hireflow_tls_only
+    volumes:
+      - rabbitmq_tls:/run/tls:ro
+      - ./deploy/rabbitmq/rabbitmq-tls-acceptance.conf:/etc/rabbitmq/conf.d/90-tls.conf:ro
+    depends_on:
+      certgen:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q listeners | grep -q 'port: 5671'"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  postgres-verify:
+    image: postgres:16-alpine
+    environment:
+      PGHOST: postgres-tls
+      PGPORT: 5432
+      PGDATABASE: hireflow_tls
+      PGUSER: hireflow
+      PGPASSWORD: hireflow_tls_only
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /run/tls/ca.crt
+      PGSSLCERT: /run/tls/client.crt
+      PGSSLKEY: /run/tls/client.key
+    entrypoint: ["/bin/sh", "/scripts/verify_postgres_tls.sh"]
+    volumes:
+      - client_tls:/run/tls:ro
+      - ./scripts/verify_postgres_tls.sh:/scripts/verify_postgres_tls.sh:ro
+    depends_on:
+      postgres-tls:
+        condition: service_healthy
+
+  rabbitmq-verify:
+    image: rabbitmq:3.13-management-alpine
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - >-
+        openssl s_client
+        -connect rabbitmq-tls:5671
+        -servername rabbitmq-tls
+        -verify_hostname rabbitmq-tls
+        -verify_return_error
+        -CAfile /run/tls/ca.crt
+        -cert /run/tls/client.crt
+        -key /run/tls/client.key
+        </dev/null 2>&1 | tee /tmp/tls.log;
+        grep -q "Verification: OK" /tmp/tls.log;
+        echo "RabbitMQ mutual TLS handshake succeeded"
+    volumes:
+      - client_tls:/run/tls:ro
+    depends_on:
+      rabbitmq-tls:
+        condition: service_healthy
+
+volumes:
+  postgres_tls:
+  rabbitmq_tls:
+  client_tls:
+
