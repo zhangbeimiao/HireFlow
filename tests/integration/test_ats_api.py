@@ -473,6 +473,57 @@ def test_offer_acceptance_hires_application_and_preserves_audits(client: httpx.C
         client, context["headers"], {"Offer 正在准备", "Offer 状态已更新"}
     )
     assert any(item["recipient"] == context["candidate"]["email"] for item in offer_deliveries)
+    tracked_delivery = next(
+        item for item in offer_deliveries if item["recipient"] == context["candidate"]["email"]
+    )
+    assert tracked_delivery["template_version"] == "recruiting-notification.v1"
+    delivered_event_id = f"delivered-{uuid4().hex}"
+    delivered_payload = {
+        "provider_event_id": delivered_event_id,
+        "event_type": "delivered",
+        "detail": "sandbox provider accepted final delivery",
+        "occurred_at": datetime.now(UTC).isoformat(),
+    }
+    first_event = _request(
+        client,
+        "POST",
+        f"/v1/admin/notification-deliveries/{tracked_delivery['id']}/events",
+        expected=200,
+        headers=context["headers"],
+        json=delivered_payload,
+    ).json()
+    repeated_event = _request(
+        client,
+        "POST",
+        f"/v1/admin/notification-deliveries/{tracked_delivery['id']}/events",
+        expected=200,
+        headers=context["headers"],
+        json=delivered_payload,
+    ).json()
+    assert repeated_event["id"] == first_event["id"]
+    bounced_at = datetime.now(UTC)
+    _request(
+        client,
+        "POST",
+        f"/v1/admin/notification-deliveries/{tracked_delivery['id']}/events",
+        expected=200,
+        headers=context["headers"],
+        json={
+            "provider_event_id": f"bounce-{uuid4().hex}",
+            "event_type": "bounced",
+            "detail": "550 mailbox unavailable",
+            "occurred_at": bounced_at.isoformat(),
+        },
+    )
+    delivery_status = _request(
+        client,
+        "GET",
+        f"/v1/admin/notification-deliveries/{tracked_delivery['id']}",
+        expected=200,
+        headers=context["headers"],
+    ).json()
+    assert delivery_status["status"] == "bounced"
+    assert delivery_status["bounce_reason"] == "550 mailbox unavailable"
 
 
 def test_interview_reschedule_conflict_versioning_and_email_delivery(

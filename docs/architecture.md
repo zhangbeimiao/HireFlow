@@ -116,9 +116,12 @@ durably claims those requests and republishes the original payload.
 The consumer also creates one `notification_deliveries` row per recipient/channel in the same
 transaction as the in-app notification. A separate SMTP Dispatcher claims pending rows with
 `FOR UPDATE SKIP LOCKED`, marks a bounded lease, and sends a multipart message whose stable
-Message-ID is derived from the delivery UUID. Provider errors persist the attempt count, truncated
-error and exponential backoff timestamp. A crash leaves a lease that another instance can reclaim;
-an SMTP acceptance records the provider Message-ID and `sent_at`. The unique
+Message-ID is derived from the delivery UUID. Every message carries an immutable template version.
+Provider failures are normalized into timeout/temporary/rate-limited/permanent classes; only retryable
+failures receive exponential backoff, while permanent 5xx recipient rejection terminates immediately.
+A crash leaves a lease that another instance can reclaim; SMTP acceptance records the provider
+Message-ID and `sent_at`. Later delivered/bounced callbacks are stored in an RLS-protected event ledger
+with a unique provider event ID, so repeated webhooks cannot duplicate state transitions. The unique
 `(notification_id, channel)` constraint prevents duplicate provider work from consumer redelivery.
 
 ## Interview questions to rehearse

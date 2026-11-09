@@ -15,7 +15,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
 - **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
-- **幂等通知与邮件**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重；站内信与邮件 Delivery 在同一事务落库。独立 SMTP Dispatcher 使用租约、指数退避和稳定 Message-ID 投递，支持 Mailpit 本地验收、失败证据和自动恢复。
+- **幂等通知与邮件**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重；站内信与邮件 Delivery 在同一事务落库。独立 SMTP Dispatcher 使用租约、指数退避和稳定 Message-ID 投递，区分超时/限流/临时与永久失败；模板版本、供应商状态、送达与退信事件均可追踪且事件回调幂等。
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效、TTL 兜底，并用短租约合并并发回源。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
@@ -113,7 +113,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
-当前回归基线为 `51` 个 Python 单元测试、`8` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+当前回归基线为 `53` 个 Python 单元测试、`8` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
 
 | 脚本 | 验证结果 |
 | --- | --- |

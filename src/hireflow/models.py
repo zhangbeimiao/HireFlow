@@ -319,6 +319,35 @@ class NotificationDelivery(Base):
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    template_version: Mapped[str] = mapped_column(
+        String(80), default="recruiting-notification.v1"
+    )
+    failure_kind: Mapped[str | None] = mapped_column(String(30))
+    provider_status_code: Mapped[int | None] = mapped_column(Integer)
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bounced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    bounce_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class NotificationDeliveryEvent(Base):
+    """Idempotent provider status callback used for delivery and bounce tracking."""
+
+    __tablename__ = "notification_delivery_events"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_event_id", name="uq_delivery_provider_event"),
+    )
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
+    delivery_id: Mapped[UUID] = mapped_column(
+        ForeignKey("notification_deliveries.id"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(40))
+    provider_event_id: Mapped[str] = mapped_column(String(255))
+    event_type: Mapped[str] = mapped_column(String(30))
+    detail: Mapped[str | None] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

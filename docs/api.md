@@ -158,10 +158,12 @@ Prometheus 暴露 `hireflow_cache_requests_total`、`hireflow_cache_hit_ratio`�
 | PATCH | `/v1/notifications/{notification_id}/read` | Owner / Recruiter / Hiring Manager | 标记单条通知已读。 |
 | POST | `/v1/notifications/read-all` | Owner / Recruiter / Hiring Manager | 标记当前租户全部通知已读。 |
 | GET | `/v1/admin/notification-deliveries?status=sent` | Owner | 查询当前租户邮件发送状态、尝试次数和失败原因。 |
+| GET | `/v1/admin/notification-deliveries/{delivery_id}` | Owner | 查询单次投递的模板版本、供应商响应、送达或退信状态。 |
+| POST | `/v1/admin/notification-deliveries/{delivery_id}/events` | Owner | 幂等记录供应商 `delivered` / `bounced` 状态事件；生产环境应由受认证的 Provider Webhook Adapter 调用。 |
 | GET | `/v1/admin/notification-failures` | Owner | 查询失败 Inbox 记录。 |
 | POST | `/v1/admin/notification-failures/{event_id}/replay` | Owner | 标记失败事件待重放。 |
 
-消费者最多处理三次，之后显式投递到 RabbitMQ DLQ；Inbox 保存租户、尝试次数与错误证据，供 Owner 定位并重放。SMTP Dispatcher 独立消费持久化 Delivery，失败后指数退避，达到上限进入 `failed`；本地 Compose 使用 Mailpit 验收真实 SMTP 内容。
+消费者最多处理三次，之后显式投递到 RabbitMQ DLQ；Inbox 保存租户、尝试次数与错误证据，供 Owner 定位并重放。SMTP Dispatcher 独立消费持久化 Delivery：超时、4xx 与供应商限流进入指数退避，5xx 永久拒收立即失败；模板版本、Message-ID、错误分类与供应商状态事件均持久化。本地 Compose 使用 Mailpit 验收真实 SMTP 内容。
 
 ## HTTP 状态码
 

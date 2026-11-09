@@ -10,6 +10,25 @@ from email.message import EmailMessage
 from html import escape
 from typing import Protocol
 
+EMAIL_TEMPLATE_VERSION = "recruiting-notification.v1"
+
+
+class ProviderDeliveryError(RuntimeError):
+    """Normalized provider failure with durable retry semantics."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        category: str,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+        self.category = category
+        self.status_code = status_code
+
 
 @dataclass(frozen=True)
 class ProviderMessage:
@@ -18,6 +37,7 @@ class ProviderMessage:
     subject: str
     text_body: str
     html_body: str | None = None
+    template_version: str = EMAIL_TEMPLATE_VERSION
 
 
 @dataclass(frozen=True)
@@ -79,6 +99,7 @@ class SMTPNotificationProvider:
         email["To"] = message.recipient
         email["Subject"] = message.subject
         email["Message-ID"] = f"<{message.delivery_id}@hireflow.local>"
+        email["X-HireFlow-Template-Version"] = message.template_version
         email.set_content(message.text_body)
         if message.html_body:
             email.add_alternative(message.html_body, subtype="html")
@@ -89,7 +110,17 @@ class SMTPNotificationProvider:
                 client.login(self.username, self.password or "")
             rejected = client.send_message(email)
         if rejected:
-            raise RuntimeError(f"SMTP rejected recipients: {', '.join(rejected)}")
+            status_code = next(iter(rejected.values()))[0]
+            retryable = 400 <= status_code < 500
+            category = "rate_limited" if status_code in {421, 450, 451, 452} else (
+                "temporary" if retryable else "permanent"
+            )
+            raise ProviderDeliveryError(
+                f"SMTP rejected recipients: {', '.join(rejected)}",
+                retryable=retryable,
+                category=category,
+                status_code=status_code,
+            )
         return ProviderResult(message_id=email["Message-ID"])
 
 

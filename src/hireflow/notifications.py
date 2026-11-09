@@ -18,7 +18,7 @@ from hireflow.models import (
     Offer,
     User,
 )
-from hireflow.notification_providers import render_email_template
+from hireflow.notification_providers import EMAIL_TEMPLATE_VERSION, render_email_template
 from hireflow.observability import NOTIFICATION_FAILURE_BACKLOG
 
 CONSUMER_NAME = "notification-consumer"
@@ -200,6 +200,7 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
                 subject=title,
                 text_body=text_body,
                 html_body=html_body,
+                template_version=EMAIL_TEMPLATE_VERSION,
             )
         )
     session.add_all([*notifications, *deliveries])

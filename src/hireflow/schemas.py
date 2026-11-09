@@ -340,9 +340,35 @@ class NotificationDeliveryRead(BaseModel):
     status: str
     attempts: int
     provider_message_id: str | None
+    template_version: str
+    failure_kind: str | None
+    provider_status_code: int | None
     last_error: str | None
     created_at: datetime
     sent_at: datetime | None
+    delivered_at: datetime | None
+    bounced_at: datetime | None
+    bounce_reason: str | None
+
+
+class NotificationDeliveryEventCreate(BaseModel):
+    provider_event_id: str = Field(min_length=1, max_length=255)
+    event_type: Literal["delivered", "bounced"]
+    detail: str | None = Field(default=None, max_length=2000)
+    occurred_at: datetime
+
+
+class NotificationDeliveryEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    delivery_id: UUID
+    provider: str
+    provider_event_id: str
+    event_type: str
+    detail: str | None
+    occurred_at: datetime
+    created_at: datetime
 
 
 class NotificationFailureRead(BaseModel):

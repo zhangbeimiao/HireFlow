@@ -47,6 +47,7 @@ from hireflow.models import (
     Interview,
     Notification,
     NotificationDelivery,
+    NotificationDeliveryEvent,
     NotificationInbox,
     User,
 )
@@ -117,6 +118,8 @@ from hireflow.schemas import (
     JobRead,
     JobUpdate,
     LoginRequest,
+    NotificationDeliveryEventCreate,
+    NotificationDeliveryEventRead,
     NotificationDeliveryRead,
     NotificationFailureRead,
     NotificationRead,
@@ -1112,6 +1115,76 @@ async def list_notification_deliveries(
         query.order_by(NotificationDelivery.created_at.desc()).limit(100)
     )
     return list(rows)
+
+
+@app.get(
+    "/v1/admin/notification-deliveries/{delivery_id}",
+    response_model=NotificationDeliveryRead,
+)
+async def get_notification_delivery(
+    delivery_id: UUID,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    delivery = await session.scalar(
+        select(NotificationDelivery).where(
+            NotificationDelivery.id == delivery_id,
+            NotificationDelivery.tenant_id == tenant_id,
+        )
+    )
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="notification delivery not found")
+    return delivery
+
+
+@app.post(
+    "/v1/admin/notification-deliveries/{delivery_id}/events",
+    response_model=NotificationDeliveryEventRead,
+)
+async def record_notification_delivery_event(
+    delivery_id: UUID,
+    payload: NotificationDeliveryEventCreate,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    delivery = await session.scalar(
+        select(NotificationDelivery).where(
+            NotificationDelivery.id == delivery_id,
+            NotificationDelivery.tenant_id == tenant_id,
+        )
+    )
+    if delivery is None:
+        raise HTTPException(status_code=404, detail="notification delivery not found")
+    existing = await session.scalar(
+        select(NotificationDeliveryEvent).where(
+            NotificationDeliveryEvent.provider == delivery.provider,
+            NotificationDeliveryEvent.provider_event_id == payload.provider_event_id,
+        )
+    )
+    if existing is not None:
+        return existing
+    event = NotificationDeliveryEvent(
+        tenant_id=tenant_id,
+        delivery_id=delivery.id,
+        provider=delivery.provider,
+        provider_event_id=payload.provider_event_id,
+        event_type=payload.event_type,
+        detail=payload.detail,
+        occurred_at=payload.occurred_at,
+    )
+    session.add(event)
+    if payload.event_type == "delivered":
+        delivery.status = "delivered"
+        delivery.delivered_at = payload.occurred_at
+    else:
+        delivery.status = "bounced"
+        delivery.bounced_at = payload.occurred_at
+        delivery.bounce_reason = payload.detail
+    await session.flush()
+    await session.commit()
+    return event
 
 
 @app.post(

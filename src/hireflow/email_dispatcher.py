@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import smtplib
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from hireflow.db import SessionLocal
 from hireflow.models import NotificationDelivery
 from hireflow.notification_providers import (
     NotificationProvider,
+    ProviderDeliveryError,
     ProviderMessage,
     provider_from_environment,
 )
@@ -20,6 +22,25 @@ from hireflow.notification_providers import (
 
 def retry_delay(attempts: int) -> timedelta:
     return timedelta(seconds=min(300, 2 ** max(0, attempts - 1)))
+
+
+def classify_provider_error(error: Exception) -> tuple[bool, str, int | None]:
+    if isinstance(error, ProviderDeliveryError):
+        return error.retryable, error.category, error.status_code
+    status_code: int | None = None
+    if isinstance(error, smtplib.SMTPRecipientsRefused) and error.recipients:
+        status_code = next(iter(error.recipients.values()))[0]
+    elif isinstance(error, smtplib.SMTPResponseException):
+        status_code = error.smtp_code
+    if status_code is not None:
+        retryable = 400 <= status_code < 500
+        category = "rate_limited" if status_code in {421, 450, 451, 452} else (
+            "temporary" if retryable else "permanent"
+        )
+        return retryable, category, status_code
+    if isinstance(error, (TimeoutError, OSError, smtplib.SMTPException)):
+        return True, "temporary", None
+    return False, "permanent", None
 
 
 async def claim_deliveries(*, limit: int, lease_seconds: int) -> list[NotificationDelivery]:
@@ -62,6 +83,8 @@ async def record_success(delivery_id: UUID, provider_message_id: str) -> None:
         delivery.sent_at = datetime.now(UTC)
         delivery.lease_expires_at = None
         delivery.last_error = None
+        delivery.failure_kind = None
+        delivery.provider_status_code = None
         await session.commit()
 
 
@@ -72,8 +95,11 @@ async def record_failure(delivery_id: UUID, error: Exception, *, max_attempts: i
             return
         delivery.attempts += 1
         delivery.last_error = str(error)[:2000]
+        retryable, failure_kind, status_code = classify_provider_error(error)
+        delivery.failure_kind = failure_kind
+        delivery.provider_status_code = status_code
         delivery.lease_expires_at = None
-        if delivery.attempts >= max_attempts:
+        if not retryable or delivery.attempts >= max_attempts:
             delivery.status = "failed"
             delivery.next_attempt_at = None
         else:
@@ -95,6 +121,7 @@ async def dispatch_once(
                     subject=delivery.subject,
                     text_body=delivery.text_body,
                     html_body=delivery.html_body,
+                    template_version=delivery.template_version,
                 )
             )
         except Exception as error:  # noqa: BLE001 - provider failures are durable state.

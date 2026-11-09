@@ -98,3 +98,4 @@
 - Notification Consumer 在 Inbox 幂等门后，同事务创建站内信和租户隔离的邮件 Delivery；`(notification_id, channel)` 唯一约束阻断重复投递副作用。
 - 独立 SMTP Dispatcher 使用 `SKIP LOCKED`、租约、稳定 Message-ID 与指数退避；面试创建/改期/取消和 Offer 变更均生成真实测试邮件。
 - `email_failure_smoke.ps1` 注入不可达 SMTP Provider，验证 `pending → retry → sent`、错误证据和无重复 Delivery；Mailpit 提供本地邮件内容验收。
+- 邮件模板保存版本号；SMTP 4xx/限流、超时和 5xx 永久失败分类处理。供应商送达/退信回调写入独立 RLS 事件账本，并通过 provider event ID 防止重复回调。

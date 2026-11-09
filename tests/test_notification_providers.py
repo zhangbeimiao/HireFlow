@@ -1,11 +1,13 @@
 import asyncio
+import smtplib
 from email.message import EmailMessage
 from typing import ClassVar, Self
 
 import pytest
 
-from hireflow.email_dispatcher import retry_delay
+from hireflow.email_dispatcher import classify_provider_error, retry_delay
 from hireflow.notification_providers import (
+    ProviderDeliveryError,
     ProviderMessage,
     SMTPNotificationProvider,
     render_email_template,
@@ -85,6 +87,7 @@ async def test_smtp_provider_sends_multipart_message_with_stable_id(monkeypatch)
     assert client.logged_in == ("service", "secret")
     assert client.message is not None
     assert client.message["Message-ID"] == result.message_id
+    assert client.message["X-HireFlow-Template-Version"] == "recruiting-notification.v1"
     assert result.message_id == "<11111111-1111-1111-1111-111111111111@hireflow.local>"
     assert client.message.is_multipart()
 
@@ -95,8 +98,23 @@ async def test_smtp_provider_surfaces_rejected_recipient(monkeypatch) -> None:
     FakeSMTP.rejected = {"candidate@example.com": (550, b"rejected")}
     monkeypatch.setattr("hireflow.notification_providers.smtplib.SMTP", FakeSMTP)
 
-    with pytest.raises(RuntimeError, match="rejected recipients"):
+    with pytest.raises(ProviderDeliveryError, match="rejected recipients") as captured:
         await provider().send(message())
+    assert captured.value.retryable is False
+    assert captured.value.category == "permanent"
+    assert captured.value.status_code == 550
+
+
+@pytest.mark.asyncio
+async def test_smtp_provider_marks_rate_limit_as_retryable(monkeypatch) -> None:
+    FakeSMTP.instances.clear()
+    FakeSMTP.rejected = {"candidate@example.com": (452, b"rate limited")}
+    monkeypatch.setattr("hireflow.notification_providers.smtplib.SMTP", FakeSMTP)
+
+    with pytest.raises(ProviderDeliveryError) as captured:
+        await provider().send(message())
+    assert captured.value.retryable is True
+    assert captured.value.category == "rate_limited"
 
 
 @pytest.mark.asyncio
@@ -115,3 +133,24 @@ def test_retry_delay_is_exponential_and_capped() -> None:
     assert retry_delay(1).total_seconds() == 1
     assert retry_delay(4).total_seconds() == 8
     assert retry_delay(20).total_seconds() == 300
+
+
+def test_unknown_provider_bug_is_not_retried_forever() -> None:
+    assert classify_provider_error(ValueError("bad provider response")) == (
+        False,
+        "permanent",
+        None,
+    )
+
+
+def test_smtp_response_codes_drive_retry_policy() -> None:
+    assert classify_provider_error(smtplib.SMTPDataError(421, b"slow down")) == (
+        True,
+        "rate_limited",
+        421,
+    )
+    assert classify_provider_error(smtplib.SMTPDataError(554, b"rejected")) == (
+        False,
+        "permanent",
+        554,
+    )

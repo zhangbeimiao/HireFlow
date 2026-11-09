@@ -33,6 +33,7 @@ $tables = @(
     "interviews",
     "jobs",
     "notification_deliveries",
+    "notification_delivery_events",
     "notification_inbox",
     "notifications",
     "offer_audits",
