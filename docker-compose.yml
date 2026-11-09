@@ -34,6 +34,15 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "${HIREFLOW_BIND_ADDRESS:-127.0.0.1}:8025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
   migrate:
     build: .
     command: alembic upgrade head
@@ -118,4 +127,20 @@ services:
       migrate:
         condition: service_completed_successfully
       rabbitmq:
+        condition: service_healthy
+  email-dispatcher:
+    build: .
+    command: python -m hireflow.email_dispatcher
+    restart: on-failure
+    environment:
+      HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow:${HIREFLOW_POSTGRES_PASSWORD:?set HIREFLOW_POSTGRES_PASSWORD in .env}@postgres:5432/hireflow"
+      HIREFLOW_SMTP_HOST: mailpit
+      HIREFLOW_SMTP_PORT: 1025
+      HIREFLOW_SMTP_SENDER: ${HIREFLOW_SMTP_SENDER:-HireFlow <no-reply@hireflow.local>}
+      HIREFLOW_SMTP_TIMEOUT_SECONDS: ${HIREFLOW_SMTP_TIMEOUT_SECONDS:-5}
+      HIREFLOW_EMAIL_MAX_ATTEMPTS: ${HIREFLOW_EMAIL_MAX_ATTEMPTS:-3}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
         condition: service_healthy

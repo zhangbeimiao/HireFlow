@@ -7,7 +7,18 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hireflow.models import Application, Interview, Job, Notification, NotificationInbox, Offer
+from hireflow.models import (
+    Application,
+    Candidate,
+    Interview,
+    Job,
+    Notification,
+    NotificationDelivery,
+    NotificationInbox,
+    Offer,
+    User,
+)
+from hireflow.notification_providers import render_email_template
 from hireflow.observability import NOTIFICATION_FAILURE_BACKLOG
 
 CONSUMER_NAME = "notification-consumer"
@@ -20,6 +31,8 @@ class InvalidEvent(ValueError):
 def _message_for(event_type: str, interview: Interview) -> tuple[str, str]:
     if event_type == "interview.scheduled":
         return "面试已安排", f"面试时间：{interview.starts_at.isoformat()}"
+    if event_type == "interview.rescheduled":
+        return "面试时间已调整", f"新的面试时间：{interview.starts_at.isoformat()}"
     if event_type == "interview.status_changed":
         if interview.status == "confirmed":
             return "面试已确认", f"面试已确认，时间：{interview.starts_at.isoformat()}"
@@ -153,9 +166,22 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
     else:
         raise InvalidEvent(f"unsupported event type: {event_type}")
 
-    session.add_all(
-        [
+    notifications: list[Notification] = []
+    deliveries: list[NotificationDelivery] = []
+    text_body, html_body = render_email_template(title, content)
+    for recipient_type, recipient_id in recipients:
+        recipient_model = Candidate if recipient_type == "candidate" else User
+        recipient_email = await session.scalar(
+            select(recipient_model.email).where(
+                recipient_model.id == recipient_id, recipient_model.tenant_id == tenant_id
+            )
+        )
+        if recipient_email is None:
+            raise InvalidEvent(f"{recipient_type} recipient has no tenant-scoped email address")
+        notification_id = uuid4()
+        notifications.append(
             Notification(
+                id=notification_id,
                 tenant_id=tenant_id,
                 source_event_id=event_id,
                 recipient_type=recipient_type,
@@ -163,9 +189,20 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
                 title=title,
                 content=content,
             )
-            for recipient_type, recipient_id in recipients
-        ]
-    )
+        )
+        deliveries.append(
+            NotificationDelivery(
+                tenant_id=tenant_id,
+                notification_id=notification_id,
+                channel="email",
+                provider="smtp",
+                recipient=recipient_email,
+                subject=title,
+                text_body=text_body,
+                html_body=html_body,
+            )
+        )
+    session.add_all([*notifications, *deliveries])
     inbox.status = "processed"
     inbox.processed_at = datetime.now(UTC)
     await session.commit()

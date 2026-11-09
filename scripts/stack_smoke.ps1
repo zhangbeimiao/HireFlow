@@ -1,7 +1,16 @@
 $ErrorActionPreference = "Stop"
 
 $services = docker compose ps --format json | ConvertFrom-Json
-$expectedServices = @("postgres", "rabbitmq", "redis", "api", "outbox-relay", "notification-consumer")
+$expectedServices = @(
+    "postgres",
+    "rabbitmq",
+    "redis",
+    "mailpit",
+    "api",
+    "outbox-relay",
+    "notification-consumer",
+    "email-dispatcher"
+)
 $unhealthy = @()
 
 foreach ($name in $expectedServices) {

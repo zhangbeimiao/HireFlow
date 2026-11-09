@@ -11,13 +11,14 @@
 | 数据提交成功但消息未发送 | 业务事务内写 Outbox，Relay 异步投递 | 消除双写窗口，允许至少一次投递。 |
 | Relay 并发抢占或 Broker 中断 | Go Relay 原子 `SKIP LOCKED` 抢占、Publisher Confirm、租约与持久化退避 | PostgreSQL 并发测试和 RabbitMQ 中断恢复脚本覆盖。 |
 | 消息重复消费 | Inbox 和 Notification 的唯一键幂等 | Relay 重投不会重复创建站内信。 |
+| 邮件供应商超时或宕机 | 持久化 Delivery、租约、稳定 Message-ID 与指数退避 | 故障脚本验证失败证据、恢复后发送及无重复行。 |
 | 招聘决策并发覆盖或跨表不一致 | Application/Offer 状态机、版本乐观锁、审计与同事务 Outbox | ATS 脚本验证非法/过期更新 `409`、评分卡锁定、Offer 接受自动录用。 |
 | 突发请求压垮认证与写接口 | Redis 固定窗口限流 | 限流脚本验证第 11 次失败登录返回 `429`。 |
 | 重复列表查询增加数据库负载 | 租户级 Redis Cache Aside，提交后失效、TTL 兜底 | 单测覆盖隔离/失效/降级，Locust 对比数据库回源与热缓存。 |
 
 ## 当前有意保留的边界
 
-1. 通知仅落库模拟，没有接入第三方邮件或短信供应商；因此不承诺真实外部投递成功率。
+1. 开发环境已通过 SMTP/Mailpit 验收真实邮件；生产供应商的域名信誉、配额和外部 SLA 不在本地项目承诺范围内。
 2. Redis 承担列表缓存与限流，但不参与排期正确性；短暂不可用时缓存读取 fail-open 回 PostgreSQL，不破坏 PostgreSQL 的一致性约束。
 3. GitHub Actions 已运行静态检查、单元测试和完整 Docker 集成验收，包括 RLS、可靠消息、并发排期与缓存性能对比。
 
@@ -26,7 +27,7 @@
 1. **生产化配置**：用密钥管理替代 Compose 明文开发密码；配置 CORS、HTTPS 终止与日志采集。
 2. **指标与告警**：制作 Grafana 面板，围绕缓存命中率、排期冲突率、Outbox 延迟、DLQ 堆积和限流命中率设置告警。
 3. **缓存防击穿**：当真实流量证明热点 Key 重建竞争明显时，再引入短租约或请求合并，而不是提前增加分布式锁复杂度。
-4. **通知通道**：接入邮件供应商，并把供应商回执与重放审计纳入通知状态机。
+4. **通知通道**：接入生产邮件供应商 Webhook，将最终送达、退信和投诉回执纳入状态机。
 # HireFlow 工程化推进记录
 
 ## 阶段一：并发与数据一致性
@@ -89,3 +90,9 @@
 - 职位可配置有顺序、时长和评分维度的 Interview Round；面试可关联 Application 与 Round。
 - 面试官评分卡支持草稿与最终提交，提交后不可修改；Offer 使用独立状态机与审计，接受后在同一事务内将 Application 推进至 `hired`。
 - 新表全部启用并强制 PostgreSQL RLS；`ats_smoke.ps1` 覆盖主链路、评分卡锁定、审计、通知和跨租户不可见，`notification_idempotency_smoke.ps1` 额外验证 ATS 事件跨事务重复投递只产生一次副作用。
+
+## 阶段十：SMTP 通知闭环
+
+- Notification Consumer 在 Inbox 幂等门后，同事务创建站内信和租户隔离的邮件 Delivery；`(notification_id, channel)` 唯一约束阻断重复投递副作用。
+- 独立 SMTP Dispatcher 使用 `SKIP LOCKED`、租约、稳定 Message-ID 与指数退避；面试创建/改期/取消和 Offer 变更均生成真实测试邮件。
+- `email_failure_smoke.ps1` 注入不可达 SMTP Provider，验证 `pending → retry → sent`、错误证据和无重复 Delivery；Mailpit 提供本地邮件内容验收。

@@ -6,7 +6,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 
 ## 技术栈
 
-`Python 3.11+` · `Go 1.27` · `FastAPI` · `pgx` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `Docker Compose` · `pytest` · `Go test` · `Locust` · `Prometheus`
+`Python 3.11+` · `Go 1.27` · `FastAPI` · `pgx` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `SMTP/Mailpit` · `Docker Compose` · `pytest` · `Playwright` · `Go test` · `Locust` · `Prometheus`
 
 ## 已实现能力
 
@@ -15,7 +15,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
 - **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
-- **幂等通知**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重，支持重试队列、DLQ 和 Owner 人工重放。
+- **幂等通知与邮件**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重；站内信与邮件 Delivery 在同一事务落库。独立 SMTP Dispatcher 使用租约、指数退避和稳定 Message-ID 投递，支持 Mailpit 本地验收、失败证据和自动恢复。
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效并设置 TTL。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
@@ -24,11 +24,14 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 ```text
 Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
                     │                                  ├─ interviews + audit + outbox
-                    │                                  └─ notification inbox + in-app notifications
+                    │                                  └─ inbox + in-app notifications + email deliveries
                     ▼
           Go Outbox Relay → RabbitMQ → Python Notification Consumer
           (pgx + Confirm)          ├─ retry queue (5s)
                                    └─ DLQ + Owner replay
+                                               │
+                                               ▼
+                                  SMTP Dispatcher → Mailpit / SMTP Provider
 ```
 
 更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)。
@@ -66,6 +69,7 @@ docker compose up --build -d
 - API Prometheus：`http://127.0.0.1:8000/metrics`
 - Outbox Relay Prometheus：`http://127.0.0.1:9101/metrics`
 - Notification Consumer Prometheus：`http://127.0.0.1:9102/metrics`
+- Mailpit 测试邮箱：`http://127.0.0.1:8025`
 - RabbitMQ 管理台：`http://127.0.0.1:15672`（账号 `hireflow`，密码来自本机 `.env`）
 
 ## 开发与验收
@@ -74,14 +78,15 @@ docker compose up --build -d
 python -m pip install -e ".[dev]"
 python -m ruff check src tests migrations
 python -m pytest -q
-# Docker Compose 已启动后运行 4 个黑盒 ATS API 集成测试
-$env:HIREFLOW_RUN_INTEGRATION = "1"
+# Docker Compose 已启动后运行 6 个黑盒 ATS API 集成测试
+$env:HIREFLOW_INTEGRATION_BASE_URL = "http://127.0.0.1:8000"
 python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 .\scripts\demo.ps1
 .\scripts\workbench_smoke.ps1
 .\scripts\ats_smoke.ps1
 .\scripts\notification_idempotency_smoke.ps1
+.\scripts\email_failure_smoke.ps1
 .\scripts\stack_smoke.ps1
 .\scripts\security_smoke.ps1
 .\scripts\rate_limit_smoke.ps1
@@ -104,7 +109,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
-当前回归基线为 `42` 个 Python 单元测试和 `4` 个真实 HTTP/PostgreSQL/RabbitMQ 黑盒 ATS 集成测试；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+当前回归基线为 `48` 个 Python 单元测试、`6` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS 集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
 
 | 脚本 | 验证结果 |
 | --- | --- |
@@ -112,6 +117,7 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `workbench_smoke.ps1` | 验证工作台依赖的列表、可用时段推荐、dashboard 聚合与排期 `201/409`。 |
 | `ats_smoke.ps1` | 走通申请阶段、面试轮次、评分卡锁定、Offer 接受后自动录用、审计、通知与跨租户隔离。 |
 | `notification_idempotency_smoke.ps1` | 模拟同一 ATS 事件跨事务重复投递两次，验证 Inbox 与业务通知均只有一条。 |
+| `email_failure_smoke.ps1` | 使用一次性不可达 SMTP Provider 验证失败持久化、指数退避、恢复后成功发送及无重复 Delivery。 |
 | `stack_smoke.ps1` | 检查 Compose 服务、兼容健康接口、进程 liveness 与 PostgreSQL/Redis readiness。 |
 | `migration_smoke.ps1` | 在脚本专用空数据库中验证 Alembic `head → base → head`，先校验目标库名且不触碰业务库。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
@@ -158,7 +164,7 @@ EXCLUDE USING gist (
 
 ## 当前边界
 
-- 通知为站内信模拟，尚未接入真实邮件供应商。
+- 默认开发环境使用 Mailpit 接收真实 SMTP 邮件；生产环境仍需配置受信任邮件供应商、域名认证与发送配额。
 - Redis 用于列表缓存和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
 - API readiness 将 PostgreSQL 视为关键依赖；Redis 不可用时返回 `degraded` 但仍接流量，RabbitMQ 由 Outbox 解耦而不阻断同步 API。
 - 默认 Compose 使用 Go Relay；Python Relay 保留在 `python-relay` profile 中用于回归对比和紧急回退，不允许两者在同一环境长期同时运行。

@@ -18,6 +18,7 @@ Scheduling service
   └─ active interviews subtracted before matching
 
 Go Outbox Relay ──> RabbitMQ ──> Python Notification Consumer ──> PostgreSQL notifications
+                                                            └──> email deliveries ──> SMTP Dispatcher
 ```
 
 ## Go Outbox Relay
@@ -111,6 +112,14 @@ count, then sent to a 5-second retry queue. After three total deliveries the con
 message to `hireflow.events.dlq`; this explicit publish keeps upgrades compatible with queues created by
 older versions. An Owner can list failed deliveries and request a replay through the admin API; the consumer
 durably claims those requests and republishes the original payload.
+
+The consumer also creates one `notification_deliveries` row per recipient/channel in the same
+transaction as the in-app notification. A separate SMTP Dispatcher claims pending rows with
+`FOR UPDATE SKIP LOCKED`, marks a bounded lease, and sends a multipart message whose stable
+Message-ID is derived from the delivery UUID. Provider errors persist the attempt count, truncated
+error and exponential backoff timestamp. A crash leaves a lease that another instance can reclaim;
+an SMTP acceptance records the provider Message-ID and `sent_at`. The unique
+`(notification_id, channel)` constraint prevents duplicate provider work from consumer redelivery.
 
 ## Interview questions to rehearse
 

@@ -26,7 +26,14 @@ from hireflow.dashboard import dashboard_overview
 from hireflow.db import engine, get_session, get_tenant_session, tenant_session_scope
 from hireflow.domain import ApplicationStage, InterviewStatus
 from hireflow.health import postgres_ready, readiness_response, redis_ready
-from hireflow.models import Base, Interview, Notification, NotificationInbox, User
+from hireflow.models import (
+    Base,
+    Interview,
+    Notification,
+    NotificationDelivery,
+    NotificationInbox,
+    User,
+)
 from hireflow.notifications import request_replay
 from hireflow.observability import SCHEDULING_CONFLICTS, begin_request, finish_request
 from hireflow.pagination import (
@@ -86,6 +93,7 @@ from hireflow.schemas import (
     DashboardOverviewRead,
     InterviewCreate,
     InterviewRead,
+    InterviewReschedule,
     InterviewRoundCreate,
     InterviewRoundRead,
     InterviewStatusUpdate,
@@ -93,6 +101,7 @@ from hireflow.schemas import (
     JobRead,
     JobUpdate,
     LoginRequest,
+    NotificationDeliveryRead,
     NotificationFailureRead,
     NotificationRead,
     OfferAuditRead,
@@ -115,6 +124,7 @@ from hireflow.service import (
     create_interview,
     list_audits,
     list_interviews,
+    reschedule_interview,
     transition_interview,
 )
 
@@ -744,6 +754,26 @@ async def update_status(
         raise HTTPException(status_code=409, detail=str(error)) from error
 
 
+@app.post("/v1/interviews/{interview_id}/reschedule", response_model=InterviewRead)
+async def reschedule(
+    interview_id: UUID,
+    payload: InterviewReschedule,
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(
+        require_roles(UserRole.OWNER, UserRole.RECRUITER, UserRole.HIRING_MANAGER)
+    ),
+    session: AsyncSession = Depends(tenant_session),
+) -> Interview:
+    try:
+        return await reschedule_interview(session, tenant_id, interview_id, payload)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except (InvalidTransition, SchedulingConflict, StaleVersion) as error:
+        if isinstance(error, SchedulingConflict):
+            SCHEDULING_CONFLICTS.inc()
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/v1/interviews/{interview_id}/audit", response_model=list[AuditRead])
 async def interview_audit(
     interview_id: UUID,
@@ -930,6 +960,24 @@ async def list_notification_failures(
         select(NotificationInbox)
         .where(NotificationInbox.tenant_id == tenant_id, NotificationInbox.status == "failed")
         .order_by(NotificationInbox.created_at.desc())
+    )
+    return list(rows)
+
+
+@app.get(
+    "/v1/admin/notification-deliveries", response_model=list[NotificationDeliveryRead]
+)
+async def list_notification_deliveries(
+    status_filter: str | None = Query(default=None, alias="status", max_length=30),
+    tenant_id: UUID = Depends(current_tenant),
+    _: Principal = Depends(require_roles(UserRole.OWNER)),
+    session: AsyncSession = Depends(tenant_session),
+):
+    query = select(NotificationDelivery).where(NotificationDelivery.tenant_id == tenant_id)
+    if status_filter:
+        query = query.where(NotificationDelivery.status == status_filter)
+    rows = await session.scalars(
+        query.order_by(NotificationDelivery.created_at.desc()).limit(100)
     )
     return list(rows)
 

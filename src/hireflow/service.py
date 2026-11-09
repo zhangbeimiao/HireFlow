@@ -19,7 +19,12 @@ from hireflow.models import (
 )
 from hireflow.pagination import PageCursor
 from hireflow.recruiting import InvalidReference
-from hireflow.schemas import DashboardInterviewRead, InterviewCreate, InterviewStatusUpdate
+from hireflow.schemas import (
+    DashboardInterviewRead,
+    InterviewCreate,
+    InterviewReschedule,
+    InterviewStatusUpdate,
+)
 
 
 class SchedulingConflict(Exception):
@@ -202,6 +207,85 @@ async def transition_interview(
     )
     await session.commit()
     # A committed session may check out another pooled connection for this read.
+    await set_tenant_context(session, tenant_id)
+    return await session.scalar(select(Interview).where(Interview.id == interview_id))
+
+
+async def reschedule_interview(
+    session: AsyncSession, tenant_id: UUID, interview_id: UUID, payload: InterviewReschedule
+) -> Interview:
+    interview = await session.scalar(
+        select(Interview).where(Interview.id == interview_id, Interview.tenant_id == tenant_id)
+    )
+    if interview is None:
+        raise LookupError("interview not found")
+    if InterviewStatus(interview.status) not in ACTIVE_STATUSES:
+        raise InvalidTransition("only an active interview can be rescheduled")
+
+    existing = await session.scalars(
+        select(Interview).where(
+            Interview.tenant_id == tenant_id,
+            Interview.interviewer_id == interview.interviewer_id,
+            Interview.id != interview_id,
+            Interview.status.in_([status.value for status in ACTIVE_STATUSES]),
+        )
+    )
+    for current in existing:
+        if overlaps(payload.starts_at, payload.ends_at, current.starts_at, current.ends_at):
+            raise SchedulingConflict("interviewer already has an overlapping active interview")
+
+    old_starts_at = interview.starts_at
+    old_ends_at = interview.ends_at
+    meeting_url = payload.meeting_url if payload.meeting_url is not None else interview.meeting_url
+    try:
+        result = await session.execute(
+            update(Interview)
+            .where(
+                Interview.id == interview_id,
+                Interview.tenant_id == tenant_id,
+                Interview.version == payload.version,
+            )
+            .values(
+                starts_at=payload.starts_at,
+                ends_at=payload.ends_at,
+                meeting_url=meeting_url,
+                version=Interview.version + 1,
+            )
+        )
+        if result.rowcount != 1:
+            await session.rollback()
+            raise StaleVersion(
+                "interview was changed by another request; read it again and retry"
+            )
+        session.add(
+            InterviewAudit(
+                interview_id=interview_id,
+                from_status=interview.status,
+                to_status=interview.status,
+                reason=payload.reason or "interview rescheduled",
+            )
+        )
+        session.add(
+            OutboxEvent(
+                tenant_id=tenant_id,
+                aggregate_id=interview_id,
+                event_type="interview.rescheduled",
+                payload={
+                    "interview_id": str(interview_id),
+                    "old_starts_at": old_starts_at.isoformat(),
+                    "old_ends_at": old_ends_at.isoformat(),
+                    "starts_at": payload.starts_at.isoformat(),
+                    "ends_at": payload.ends_at.isoformat(),
+                    "reason": payload.reason,
+                },
+            )
+        )
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        raise SchedulingConflict(
+            "interviewer already has an overlapping active interview"
+        ) from error
     await set_tenant_context(session, tenant_id)
     return await session.scalar(select(Interview).where(Interview.id == interview_id))
 

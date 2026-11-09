@@ -132,6 +132,7 @@ Prometheus 暴露 `hireflow_cache_requests_total`、`hireflow_cache_hit_ratio`�
 | POST | `/v1/scheduling/suggestions` | Owner / Recruiter / Hiring Manager | 返回共同可用时段；不预占。 |
 | POST | `/v1/interviews` | Owner / Recruiter / Hiring Manager | 创建面试；竞争冲突 `409`。 |
 | GET | `/v1/interviews?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 按开始时间与 ID 倒序游标分页查询面试，包含候选人、职位与面试官展示信息。 |
+| POST | `/v1/interviews/{interview_id}/reschedule` | Owner / Recruiter / Hiring Manager | 改期并写审计/Outbox；须携带 `version`，重叠或旧版本返回 `409`。 |
 | POST | `/v1/interviews/{interview_id}/status` | Owner / Recruiter / Hiring Manager / Interviewer | 状态迁移，必须携带读取时的 `version`。 |
 | GET | `/v1/interviews/{interview_id}` | 相关角色 | 获取同租户面试。 |
 | GET | `/v1/interviews/{interview_id}/audit` | Owner / Recruiter / Hiring Manager | 获取审计记录。 |
@@ -143,10 +144,13 @@ Prometheus 暴露 `hireflow_cache_requests_total`、`hireflow_cache_hit_ratio`�
 | Method | Path | 权限 | 说明 |
 | --- | --- | --- | --- |
 | GET | `/v1/notifications?limit=20&cursor=...` | Owner / Recruiter / Hiring Manager | 按创建时间与 ID 倒序游标分页查询本企业站内通知。 |
+| PATCH | `/v1/notifications/{notification_id}/read` | Owner / Recruiter / Hiring Manager | 标记单条通知已读。 |
+| POST | `/v1/notifications/read-all` | Owner / Recruiter / Hiring Manager | 标记当前租户全部通知已读。 |
+| GET | `/v1/admin/notification-deliveries?status=sent` | Owner | 查询当前租户邮件发送状态、尝试次数和失败原因。 |
 | GET | `/v1/admin/notification-failures` | Owner | 查询失败 Inbox 记录。 |
 | POST | `/v1/admin/notification-failures/{event_id}/replay` | Owner | 标记失败事件待重放。 |
 
-消费者最多处理三次，之后显式投递到 RabbitMQ DLQ；Inbox 保存租户、尝试次数与错误证据，供 Owner 定位并重放。
+消费者最多处理三次，之后显式投递到 RabbitMQ DLQ；Inbox 保存租户、尝试次数与错误证据，供 Owner 定位并重放。SMTP Dispatcher 独立消费持久化 Delivery，失败后指数退避，达到上限进入 `failed`；本地 Compose 使用 Mailpit 验收真实 SMTP 内容。
 
 ## HTTP 状态码
 

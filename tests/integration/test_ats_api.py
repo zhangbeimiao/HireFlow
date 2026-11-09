@@ -119,6 +119,24 @@ def _advance(client: httpx.Client, context: dict, stage: str) -> dict:
     return context["application"]
 
 
+def _wait_for_sent_subjects(
+    client: httpx.Client, headers: dict[str, str], expected_subjects: set[str]
+) -> list[dict]:
+    deliveries: list[dict] = []
+    for _ in range(40):
+        deliveries = _request(
+            client,
+            "GET",
+            "/v1/admin/notification-deliveries?status=sent",
+            expected=200,
+            headers=headers,
+        ).json()
+        if expected_subjects.issubset({item["subject"] for item in deliveries}):
+            return deliveries
+        time.sleep(0.25)
+    pytest.fail(f"timed out waiting for sent email subjects: {sorted(expected_subjects)}")
+
+
 def test_application_state_machine_audit_and_optimistic_lock(client: httpx.Client) -> None:
     context = _new_application(client, "state")
     application = context["application"]
@@ -335,6 +353,93 @@ def test_offer_acceptance_hires_application_and_preserves_audits(client: httpx.C
     assert application["stage"] == "hired"
     assert application_audits[-1]["to_stage"] == "hired"
     assert [item["to_status"] for item in offer_audits] == ["draft", "sent", "accepted"]
+    offer_deliveries = _wait_for_sent_subjects(
+        client, context["headers"], {"Offer 正在准备", "Offer 状态已更新"}
+    )
+    assert any(item["recipient"] == context["candidate"]["email"] for item in offer_deliveries)
+
+
+def test_interview_reschedule_conflict_versioning_and_email_delivery(
+    client: httpx.Client,
+) -> None:
+    context = _new_application(client, "reschedule")
+    interviewer_email = f"interviewer.{uuid4().hex[:10]}@hireflow.demo"
+    interviewer = _request(
+        client,
+        "POST",
+        "/v1/users",
+        expected=201,
+        headers=context["headers"],
+        json={
+            "email": interviewer_email,
+            "display_name": "Reschedule Interviewer",
+            "role": "interviewer",
+            "password": PASSWORD,
+        },
+    ).json()
+    starts_at = datetime.now(UTC).replace(microsecond=0) + timedelta(days=8)
+    interview = _request(
+        client,
+        "POST",
+        "/v1/interviews",
+        expected=201,
+        headers=context["headers"],
+        json={
+            "candidate_id": context["candidate"]["id"],
+            "interviewer_id": interviewer["id"],
+            "job_id": context["job"]["id"],
+            "application_id": context["application"]["id"],
+            "starts_at": starts_at.isoformat(),
+            "ends_at": (starts_at + timedelta(hours=1)).isoformat(),
+        },
+    ).json()
+    next_starts_at = starts_at + timedelta(days=1)
+    rescheduled = _request(
+        client,
+        "POST",
+        f"/v1/interviews/{interview['id']}/reschedule",
+        expected=200,
+        headers=context["headers"],
+        json={
+            "starts_at": next_starts_at.isoformat(),
+            "ends_at": (next_starts_at + timedelta(hours=1)).isoformat(),
+            "version": interview["version"],
+            "reason": "candidate requested another day",
+        },
+    ).json()
+    _request(
+        client,
+        "POST",
+        f"/v1/interviews/{interview['id']}/reschedule",
+        expected=409,
+        headers=context["headers"],
+        json={
+            "starts_at": (next_starts_at + timedelta(days=1)).isoformat(),
+            "ends_at": (next_starts_at + timedelta(days=1, hours=1)).isoformat(),
+            "version": interview["version"],
+        },
+    )
+    cancelled = _request(
+        client,
+        "POST",
+        f"/v1/interviews/{interview['id']}/status",
+        expected=200,
+        headers=context["headers"],
+        json={
+            "status": "cancelled",
+            "version": rescheduled["version"],
+            "reason": "role paused",
+        },
+    ).json()
+
+    deliveries = _wait_for_sent_subjects(
+        client, context["headers"], {"面试已安排", "面试时间已调整", "面试已取消"}
+    )
+    recipients = {item["recipient"] for item in deliveries}
+    assert datetime.fromisoformat(rescheduled["starts_at"]) == next_starts_at
+    assert cancelled["status"] == "cancelled"
+    assert context["candidate"]["email"] in recipients
+    assert interviewer_email in recipients
 
 
 def test_cross_tenant_cannot_observe_or_mutate_application(client: httpx.Client) -> None:

@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 
 from hireflow.domain import ApplicationStage, InterviewStatus, OfferStatus
 
@@ -33,6 +33,24 @@ class InterviewStatusUpdate(BaseModel):
         ge=1, description="Version read by the caller; protects against lost updates"
     )
     reason: str | None = Field(default=None, max_length=500)
+
+
+class InterviewReschedule(BaseModel):
+    starts_at: datetime
+    ends_at: datetime
+    version: int = Field(
+        ge=1, description="Version read by the caller; protects against lost updates"
+    )
+    meeting_url: str | None = Field(default=None, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_interval(self) -> "InterviewReschedule":
+        if self.starts_at.tzinfo is None or self.ends_at.tzinfo is None:
+            raise ValueError("timestamps must include an offset, for example +08:00")
+        if self.starts_at >= self.ends_at:
+            raise ValueError("starts_at must be before ends_at")
+        return self
 
 
 class InterviewRead(BaseModel):
@@ -302,6 +320,23 @@ class NotificationRead(BaseModel):
     content: str
     created_at: datetime
     read_at: datetime | None
+
+
+class NotificationDeliveryRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    notification_id: UUID
+    channel: str
+    provider: str
+    recipient: str
+    subject: str
+    status: str
+    attempts: int
+    provider_message_id: str | None
+    last_error: str | None
+    created_at: datetime
+    sent_at: datetime | None
 
 
 class NotificationFailureRead(BaseModel):
