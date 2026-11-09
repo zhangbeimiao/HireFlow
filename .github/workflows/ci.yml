@@ -135,6 +135,25 @@ jobs:
             prom/prometheus:v3.5.0 \
             check config /etc/prometheus/prometheus.yml
 
+      - name: Validate development, test, production, and TLS Compose overlays
+        env:
+          HIREFLOW_JWT_KEYS: '{"ci-2026":"hireflow-ci-rotating-key-with-at-least-32-bytes"}'
+          HIREFLOW_JWT_ACTIVE_KEY_ID: ci-2026
+          HIREFLOW_SMTP_HOST: smtp.example.test
+          HIREFLOW_SMTP_USERNAME: ci-user
+          HIREFLOW_SMTP_PASSWORD: ci-password
+          HIREFLOW_TLS_ROOT: /tmp/hireflow-tls
+          HIREFLOW_API_DATABASE_TLS_URL: postgresql+asyncpg://hireflow_app:ci@postgres:5432/hireflow?ssl=require
+          HIREFLOW_MIGRATION_DATABASE_TLS_URL: postgresql+psycopg://hireflow:ci@postgres:5432/hireflow?sslmode=require
+          HIREFLOW_RELAY_DATABASE_TLS_URL: postgresql://hireflow:ci@postgres:5432/hireflow?sslmode=require
+          HIREFLOW_OWNER_DATABASE_TLS_URL: postgresql+asyncpg://hireflow:ci@postgres:5432/hireflow?ssl=require
+          HIREFLOW_RABBITMQ_TLS_URL: amqps://hireflow:ci@rabbitmq:5671/
+        run: |
+          docker compose -f docker-compose.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.test.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.tls.example.yml config --quiet
+
       - name: Start full application stack
         run: docker compose up --build -d --wait --wait-timeout 90
 

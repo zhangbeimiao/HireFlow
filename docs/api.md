@@ -6,7 +6,7 @@ Base URL：`http://127.0.0.1:8000`。除认证初始化、登录与健康检查�
 Authorization: Bearer <access_token>
 ```
 
-Token 包含用户、企业和角色声明；服务端不以客户端传入的 `tenant_id` 作为授权依据。
+Access Token 包含用户、企业和角色声明；服务端不以客户端传入的 `tenant_id` 作为授权依据。JWT 头携带 `kid`，验签仅接受当前配置的密钥 ID；Refresh Token 为随机不透明值，数据库仅保存 SHA-256 摘要。
 
 ## 健康检查
 
@@ -46,11 +46,18 @@ Content-Type: application/json
 }
 ```
 
-成功返回 `201 Created`，响应中的 `access_token` 用于后续请求：
+成功返回 `201 Created`，响应同时返回短期 Access Token 和一次性轮换的 Refresh Token：
 
 ```json
-{"access_token":"<jwt>","token_type":"bearer"}
+{
+  "access_token": "<jwt>",
+  "refresh_token": "<opaque-token>",
+  "expires_in": 1800,
+  "token_type": "bearer"
+}
 ```
+
+`POST /v1/auth/refresh` 成功后会撤销旧 Refresh Token 并返回新的 Token Pair；旧 Token 重放返回 `401`。`POST /v1/auth/logout` 撤销当前 Refresh Token，成功返回 `204`。
 
 ### 创建面试
 
@@ -81,8 +88,10 @@ Content-Type: application/json
 
 | Method | Path | 权限 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/v1/auth/bootstrap` | 公开 | 创建企业与首个 Owner，返回 JWT。 |
+| POST | `/v1/auth/bootstrap` | 公开 | 创建企业与首个 Owner，返回 Access/Refresh Token Pair。 |
 | POST | `/v1/auth/tokens` | 公开 | 企业 ID、邮箱、密码登录；失败统一 `401`。 |
+| POST | `/v1/auth/refresh` | 公开 | 原子撤销旧 Refresh Token 并轮换新 Token Pair；过期、撤销或重放返回 `401`。 |
+| POST | `/v1/auth/logout` | 公开 | 撤销指定 Refresh Token；成功返回 `204`。 |
 | POST | `/v1/users` | Owner | 创建 Recruiter、Hiring Manager 或 Interviewer。 |
 | GET | `/v1/users` | Owner / Recruiter / Hiring Manager | 查询当前租户成员，供排期选择面试官。 |
 | POST | `/v1/jobs` | Owner / Recruiter / Hiring Manager | 创建职位。 |

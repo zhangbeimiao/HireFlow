@@ -1,0 +1,40 @@
+# Illustrative TLS overlay. Mount certificates from a secret store; never commit private keys.
+services:
+  postgres:
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/run/tls/postgres/server.crt
+      - -c
+      - ssl_key_file=/run/tls/postgres/server.key
+      - -c
+      - ssl_ca_file=/run/tls/ca/ca.crt
+    volumes:
+      - ${HIREFLOW_TLS_ROOT:?set certificate root}/postgres:/run/tls/postgres:ro
+      - ${HIREFLOW_TLS_ROOT:?set certificate root}/ca:/run/tls/ca:ro
+  rabbitmq:
+    volumes:
+      - ${HIREFLOW_TLS_ROOT:?set certificate root}/rabbitmq:/run/tls/rabbitmq:ro
+      - ${HIREFLOW_TLS_ROOT:?set certificate root}/ca:/run/tls/ca:ro
+      - ./deploy/rabbitmq/rabbitmq-tls.conf:/etc/rabbitmq/conf.d/90-tls.conf:ro
+    ports:
+      - "127.0.0.1:5671:5671"
+  api:
+    environment:
+      HIREFLOW_DATABASE_URL: ${HIREFLOW_API_DATABASE_TLS_URL:?set asyncpg TLS URL}
+  migrate:
+    environment:
+      HIREFLOW_MIGRATION_DATABASE_URL: ${HIREFLOW_MIGRATION_DATABASE_TLS_URL:?set psycopg TLS URL}
+  outbox-relay:
+    environment:
+      HIREFLOW_DATABASE_URL: ${HIREFLOW_RELAY_DATABASE_TLS_URL:?set pgx TLS URL}
+      HIREFLOW_RABBITMQ_URL: ${HIREFLOW_RABBITMQ_TLS_URL:?set amqps URL}
+  notification-consumer:
+    environment:
+      HIREFLOW_DATABASE_URL: ${HIREFLOW_OWNER_DATABASE_TLS_URL:?set asyncpg owner TLS URL}
+      HIREFLOW_RABBITMQ_URL: ${HIREFLOW_RABBITMQ_TLS_URL:?set amqps URL}
+  email-dispatcher:
+    environment:
+      HIREFLOW_DATABASE_URL: ${HIREFLOW_OWNER_DATABASE_TLS_URL:?set asyncpg owner TLS URL}

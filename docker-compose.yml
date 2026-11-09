@@ -58,6 +58,9 @@ services:
       # The web API is deliberately not the schema owner. RLS binds this account to the JWT tenant.
       HIREFLOW_DATABASE_URL: "postgresql+asyncpg://hireflow_app:${HIREFLOW_APP_DATABASE_PASSWORD:?set HIREFLOW_APP_DATABASE_PASSWORD in .env}@postgres:5432/hireflow"
       HIREFLOW_JWT_SECRET: ${HIREFLOW_JWT_SECRET:?set HIREFLOW_JWT_SECRET in .env}
+      HIREFLOW_JWT_KEYS: ${HIREFLOW_JWT_KEYS:-}
+      HIREFLOW_JWT_ACTIVE_KEY_ID: ${HIREFLOW_JWT_ACTIVE_KEY_ID:-}
+      HIREFLOW_REFRESH_TOKEN_DAYS: ${HIREFLOW_REFRESH_TOKEN_DAYS:-14}
       HIREFLOW_ALLOWED_HOSTS: ${HIREFLOW_ALLOWED_HOSTS:-localhost,127.0.0.1}
       HIREFLOW_REDIS_URL: redis://redis:6379/0
       HIREFLOW_LIST_CACHE_TTL_SECONDS: 60

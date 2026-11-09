@@ -56,7 +56,7 @@ function Invoke-RlsSql {
 $withoutContext = Invoke-RlsSql "SELECT count(*) FROM candidates"
 if ($withoutContext[-1] -ne "0") { throw "API role read rows without a tenant context" }
 
-foreach ($table in @("application_audits", "interview_rounds", "interview_scorecards", "offers", "offer_audits")) {
+foreach ($table in @("application_audits", "interview_rounds", "interview_scorecards", "offers", "offer_audits", "refresh_tokens")) {
     $newTableWithoutContext = Invoke-RlsSql "SELECT count(*) FROM $table"
     if ($newTableWithoutContext[-1] -ne "0") {
         throw "API role read $table rows without a tenant context"

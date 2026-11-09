@@ -1,0 +1,40 @@
+# Production hardening overlay. It deliberately removes host-published infrastructure ports,
+# disables Mailpit, and requires rotating JWT keys plus an external SMTP endpoint.
+# Supply TLS overlays/certificates and an ingress before use; see docs/production_operations.md.
+services:
+  postgres:
+    ports: !reset []
+    restart: unless-stopped
+  rabbitmq:
+    ports: !reset []
+    restart: unless-stopped
+  redis:
+    ports: !reset []
+    restart: unless-stopped
+  mailpit:
+    profiles: ["development"]
+    ports: !reset []
+  api:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      HIREFLOW_JWT_KEYS: ${HIREFLOW_JWT_KEYS:?set rotating JWT key JSON}
+      HIREFLOW_JWT_ACTIVE_KEY_ID: ${HIREFLOW_JWT_ACTIVE_KEY_ID:?set active JWT key id}
+      HIREFLOW_ALLOWED_HOSTS: ${HIREFLOW_ALLOWED_HOSTS:?set production hosts}
+  outbox-relay:
+    ports: !reset []
+    restart: unless-stopped
+  notification-consumer:
+    ports: !reset []
+    restart: unless-stopped
+  email-dispatcher:
+    restart: unless-stopped
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      HIREFLOW_SMTP_HOST: ${HIREFLOW_SMTP_HOST:?set production SMTP host}
+      HIREFLOW_SMTP_PORT: ${HIREFLOW_SMTP_PORT:-587}
+      HIREFLOW_SMTP_USERNAME: ${HIREFLOW_SMTP_USERNAME:?set production SMTP username}
+      HIREFLOW_SMTP_PASSWORD: ${HIREFLOW_SMTP_PASSWORD:?set production SMTP password}
+      HIREFLOW_SMTP_STARTTLS: "true"

@@ -10,13 +10,13 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 
 ## 已实现能力
 
-- **多租户与权限**：JWT 签发 `tenant_id` 与角色；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，跨租户资源返回 `404`；API 采用受限数据库账号，PostgreSQL RLS 作为数据隔离最终防线。
+- **多租户与权限**：短期 JWT 使用 `kid` 支持密钥轮换，不透明 Refresh Token 每次使用后原子撤销并换新；Owner、Recruiter、Hiring Manager、Interviewer 由 RBAC 校验，PostgreSQL RLS 作为跨租户数据隔离最终防线。
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
 - **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
 - **幂等通知与邮件**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重；站内信与邮件 Delivery 在同一事务落库。独立 SMTP Dispatcher 使用租约、指数退避和稳定 Message-ID 投递，支持 Mailpit 本地验收、失败证据和自动恢复。
-- **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效并设置 TTL。
+- **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效、TTL 兜底，并用短租约合并并发回源。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
 ## 架构
@@ -34,7 +34,7 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
                                   SMTP Dispatcher → Mailpit / SMTP Provider
 ```
 
-更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)。
+更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)，生产 Compose、TLS、密钥轮换、备份恢复与迁移回滚见 [生产运维说明](docs/production_operations.md)。
 
 ## 运行截图
 
@@ -62,6 +62,8 @@ docker compose up --build -d
 .\scripts\migration_smoke.ps1
 ```
 
+测试和生产配置分别通过 `docker-compose.test.yml` 与 `docker-compose.prod.yml` 叠加；`docker-compose.tls.example.yml` 仅展示 PostgreSQL/RabbitMQ TLS 挂载与连接方式，证书与私钥必须由外部密钥系统提供。
+
 - Swagger UI：`http://127.0.0.1:8000/docs`
 - 招聘工作台：`http://127.0.0.1:8000/`
 - 存活探针：`http://127.0.0.1:8000/health/live`
@@ -78,7 +80,7 @@ docker compose up --build -d
 python -m pip install -e ".[dev]"
 python -m ruff check src tests migrations
 python -m pytest -q
-# Docker Compose 已启动后运行 6 个黑盒 ATS API 集成测试
+# Docker Compose 已启动后运行 7 个黑盒 ATS/认证 API 集成测试
 $env:HIREFLOW_INTEGRATION_BASE_URL = "http://127.0.0.1:8000"
 python -m pytest -q -m integration tests/integration/test_ats_api.py
 
@@ -109,7 +111,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
-当前回归基线为 `48` 个 Python 单元测试、`6` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS 集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+当前回归基线为 `51` 个 Python 单元测试、`7` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
 
 | 脚本 | 验证结果 |
 | --- | --- |
@@ -165,7 +167,7 @@ EXCLUDE USING gist (
 ## 当前边界
 
 - 默认开发环境使用 Mailpit 接收真实 SMTP 邮件；生产环境仍需配置受信任邮件供应商、域名认证与发送配额。
-- Redis 用于列表缓存和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
+- Redis 用于列表缓存、回源请求合并和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。
 - API readiness 将 PostgreSQL 视为关键依赖；Redis 不可用时返回 `degraded` 但仍接流量，RabbitMQ 由 Outbox 解耦而不阻断同步 API。
 - 默认 Compose 使用 Go Relay；Python Relay 保留在 `python-relay` profile 中用于回归对比和紧急回退，不允许两者在同一环境长期同时运行。
 - 可选 Prometheus/Grafana 观测栈已预置 Relay 积压、吞吐、Confirm P95/P99、重试和断连面板，以及积压、失败率、重试、断连和目标不可达告警。启动方式、指标样例、滚动升级与 TLS/密钥建议见 [Relay 运维说明](docs/relay_operations.md)。

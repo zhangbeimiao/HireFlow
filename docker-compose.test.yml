@@ -1,0 +1,16 @@
+# Test overlay: deterministic short-lived credentials and in-memory mail sandbox.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.test.yml up --build -d --wait
+services:
+  api:
+    environment:
+      HIREFLOW_ACCESS_TOKEN_MINUTES: 5
+      HIREFLOW_REFRESH_TOKEN_DAYS: 1
+      HIREFLOW_LIST_CACHE_TTL_SECONDS: 5
+  mailpit:
+    environment:
+      MP_DATABASE: /tmp/mailpit-test.db
+      MP_MAX_MESSAGES: 500
+  email-dispatcher:
+    environment:
+      HIREFLOW_EMAIL_POLL_SECONDS: 0.1
+      HIREFLOW_EMAIL_MAX_ATTEMPTS: 2

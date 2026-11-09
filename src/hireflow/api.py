@@ -15,7 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.staticfiles import StaticFiles
 
-from hireflow.auth import Principal, create_access_token, current_principal, require_roles
+from hireflow.auth import (
+    Principal,
+    access_token_minutes,
+    create_access_token,
+    current_principal,
+    require_roles,
+)
+from hireflow.auth_tokens import (
+    InvalidRefreshToken,
+    issue_refresh_token,
+    revoke_refresh_token,
+    rotate_refresh_token,
+)
 from hireflow.availability import (
     add_candidate_availability,
     add_interviewer_availability,
@@ -108,6 +120,7 @@ from hireflow.schemas import (
     OfferCreate,
     OfferRead,
     OfferStatusUpdate,
+    RefreshTokenRequest,
     ScheduleSuggestionRead,
     ScheduleSuggestionRequest,
     ScorecardRead,
@@ -305,8 +318,11 @@ async def get_dashboard_overview(
 async def bootstrap(payload: TenantBootstrap, session: AsyncSession = Depends(get_session)):
     try:
         owner = await bootstrap_tenant(session, payload)
+        refresh_token = await issue_refresh_token(session, owner)
         return AccessTokenRead(
-            access_token=create_access_token(owner.id, owner.tenant_id, owner.role)
+            access_token=create_access_token(owner.id, owner.tenant_id, owner.role),
+            refresh_token=refresh_token,
+            expires_in=access_token_minutes() * 60,
         )
     except DuplicateResource as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -317,7 +333,34 @@ async def login(payload: LoginRequest, session: AsyncSession = Depends(get_sessi
     user = await authenticate(session, payload)
     if user is None:
         raise HTTPException(status_code=401, detail="invalid email or password")
-    return AccessTokenRead(access_token=create_access_token(user.id, user.tenant_id, user.role))
+    return AccessTokenRead(
+        access_token=create_access_token(user.id, user.tenant_id, user.role),
+        refresh_token=await issue_refresh_token(session, user),
+        expires_in=access_token_minutes() * 60,
+    )
+
+
+@app.post("/v1/auth/refresh", response_model=AccessTokenRead)
+async def refresh_access_token(
+    payload: RefreshTokenRequest, session: AsyncSession = Depends(get_session)
+) -> AccessTokenRead:
+    try:
+        user, refresh_token = await rotate_refresh_token(session, payload.refresh_token)
+    except InvalidRefreshToken as error:
+        raise HTTPException(status_code=401, detail="invalid refresh token") from error
+    return AccessTokenRead(
+        access_token=create_access_token(user.id, user.tenant_id, user.role),
+        refresh_token=refresh_token,
+        expires_in=access_token_minutes() * 60,
+    )
+
+
+@app.post("/v1/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(payload: RefreshTokenRequest, session: AsyncSession = Depends(get_session)) -> None:
+    try:
+        await revoke_refresh_token(session, payload.refresh_token)
+    except InvalidRefreshToken as error:
+        raise HTTPException(status_code=401, detail="invalid refresh token") from error
 
 
 @app.post("/v1/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)

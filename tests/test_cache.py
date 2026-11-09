@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import UUID
@@ -24,13 +25,22 @@ class FakeRedis:
     async def get(self, key: str) -> str | None:
         return self.values.get(key)
 
-    async def set(self, key: str, value: str, *, ex: int) -> None:
+    async def set(self, key: str, value: str, *, ex: int, nx: bool = False) -> bool:
+        if nx and key in self.values:
+            return False
         self.values[key] = value
         self.ttls[key] = ex
+        return True
 
     async def delete(self, key: str) -> None:
         self.values.pop(key, None)
         self.ttls.pop(key, None)
+
+    async def eval(self, _: str, __: int, key: str, value: str) -> int:
+        if self.values.get(key) != value:
+            return 0
+        await self.delete(key)
+        return 1
 
 
 class FailingRedis(FakeRedis):
@@ -172,3 +182,44 @@ async def test_bypass_and_redis_failure_fall_back_to_database() -> None:
 
     assert bypassed.outcome == "BYPASS"
     assert degraded.outcome == "ERROR"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_misses_are_coalesced_to_one_database_load() -> None:
+    redis = FakeRedis()
+    loads = 0
+    release_loader = asyncio.Event()
+
+    async def loader():
+        nonlocal loads
+        loads += 1
+        await release_loader.wait()
+        return [job(TENANT_A)]
+
+    first = asyncio.create_task(
+        cached_list(
+            redis,
+            resource="jobs",
+            tenant_id=TENANT_A,
+            schema=JobRead,
+            loader=loader,
+            ttl_seconds=60,
+        )
+    )
+    await asyncio.sleep(0)
+    second = asyncio.create_task(
+        cached_list(
+            redis,
+            resource="jobs",
+            tenant_id=TENANT_A,
+            schema=JobRead,
+            loader=loader,
+            ttl_seconds=60,
+        )
+    )
+    await asyncio.sleep(0.05)
+    release_loader.set()
+    results = await asyncio.gather(first, second)
+
+    assert loads == 1
+    assert {result.outcome for result in results} == {"MISS", "HIT"}

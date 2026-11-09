@@ -1,5 +1,6 @@
 """Tenant-scoped Cache Aside primitives for read-heavy recruiting lists."""
 
+import asyncio
 import json
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -7,7 +8,7 @@ from dataclasses import dataclass
 from threading import Lock
 from time import perf_counter
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 from redis.asyncio import Redis
@@ -21,6 +22,13 @@ from hireflow.observability import (
 )
 
 CacheLoader = Callable[[], Awaitable[list[Any]]]
+
+_RELEASE_LOCK = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+  return redis.call('del', KEYS[1])
+end
+return 0
+"""
 
 
 @dataclass(frozen=True)
@@ -39,6 +47,10 @@ def list_cache_key(resource: str, tenant_id: UUID) -> str:
     # Bump the namespace when a cached response schema changes. Job/Candidate list items gained
     # created_at for cursor pagination, so v2 cannot read stale v1 payloads after a deployment.
     return f"hireflow:cache:v2:tenant:{tenant_id}:{resource}:list"
+
+
+def list_cache_lock_key(resource: str, tenant_id: UUID) -> str:
+    return f"{list_cache_key(resource, tenant_id)}:rebuild"
 
 
 def _record_lookup(resource: str, outcome: str) -> None:
@@ -100,13 +112,47 @@ async def cached_list(
         _record_lookup(resource, "error")
         return CachedList(_serialize(await _load_from_database(resource, loader), schema), "ERROR")
 
-    _record_lookup(resource, "miss")
-    items = _serialize(await _load_from_database(resource, loader), schema)
+    lock_key = list_cache_lock_key(resource, tenant_id)
+    lock_value = str(uuid4())
     try:
-        await redis.set(key, json.dumps(items, separators=(",", ":")), ex=ttl_seconds)
+        acquired = bool(await redis.set(lock_key, lock_value, ex=10, nx=True))
     except RedisError:
-        _record_lookup(resource, "write_error")
-    return CachedList(items, "MISS")
+        _record_lookup(resource, "error")
+        return CachedList(_serialize(await _load_from_database(resource, loader), schema), "ERROR")
+
+    if not acquired:
+        for _ in range(20):
+            await asyncio.sleep(0.05)
+            try:
+                cached = await redis.get(key)
+            except RedisError:
+                _record_lookup(resource, "error")
+                return CachedList(
+                    _serialize(await _load_from_database(resource, loader), schema), "ERROR"
+                )
+            if cached is not None:
+                try:
+                    items = json.loads(cached)
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    break
+                if isinstance(items, list):
+                    _record_lookup(resource, "hit")
+                    return CachedList(items, "HIT")
+
+    _record_lookup(resource, "miss")
+    try:
+        items = _serialize(await _load_from_database(resource, loader), schema)
+        try:
+            await redis.set(key, json.dumps(items, separators=(",", ":")), ex=ttl_seconds)
+        except RedisError:
+            _record_lookup(resource, "write_error")
+        return CachedList(items, "MISS")
+    finally:
+        if acquired:
+            try:
+                await redis.eval(_RELEASE_LOCK, 1, lock_key, lock_value)
+            except RedisError:
+                pass
 
 
 async def invalidate_cached_list(redis: Redis, *, resource: str, tenant_id: UUID) -> None:

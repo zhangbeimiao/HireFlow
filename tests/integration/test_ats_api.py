@@ -68,6 +68,56 @@ def _bootstrap(client: httpx.Client, label: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
+def test_refresh_token_rotation_replay_and_logout(client: httpx.Client) -> None:
+    suffix = f"refresh-{uuid4().hex[:10]}"
+    issued = _request(
+        client,
+        "POST",
+        "/v1/auth/bootstrap",
+        expected=201,
+        json={
+            "tenant_name": f"Refresh integration {suffix}",
+            "owner": {
+                "email": f"owner.{suffix}@hireflow.demo",
+                "display_name": "Refresh Owner",
+                "role": "owner",
+                "password": PASSWORD,
+            },
+        },
+    ).json()
+    rotated = _request(
+        client,
+        "POST",
+        "/v1/auth/refresh",
+        expected=200,
+        json={"refresh_token": issued["refresh_token"]},
+    ).json()
+    _request(
+        client,
+        "POST",
+        "/v1/auth/refresh",
+        expected=401,
+        json={"refresh_token": issued["refresh_token"]},
+    )
+    _request(
+        client,
+        "POST",
+        "/v1/auth/logout",
+        expected=204,
+        json={"refresh_token": rotated["refresh_token"]},
+    )
+    _request(
+        client,
+        "POST",
+        "/v1/auth/refresh",
+        expected=401,
+        json={"refresh_token": rotated["refresh_token"]},
+    )
+
+    assert issued["refresh_token"] != rotated["refresh_token"]
+    assert rotated["expires_in"] == 1800
+
+
 def _new_application(client: httpx.Client, label: str) -> dict:
     headers = _bootstrap(client, label)
     job = _request(
