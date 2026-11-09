@@ -270,6 +270,10 @@ jobs:
         shell: pwsh
         run: ./scripts/cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 5 -ItemsPerList 10
 
+      - name: Verify multi-instance hot-key request coalescing
+        shell: pwsh
+        run: ./scripts/multi_api_hot_key.ps1 -Requests 30 -ApiInstances 3
+
       - name: Verify Redis rate limiting and observability
         shell: pwsh
         run: |

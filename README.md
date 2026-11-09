@@ -104,6 +104,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 .\scripts\load_test.ps1 -Users 20 -SpawnRate 10
 # 对比强制 PostgreSQL 回源与 Redis 热缓存的 RPS、P95、P99
 .\scripts\cache_performance.ps1 -Users 10 -SpawnRate 10 -RunSeconds 10
+.\scripts\multi_api_hot_key.ps1 -Requests 60 -ApiInstances 3
 # 在独立 Compose 项目中对比 Go/Python Relay，不访问主环境数据
 .\scripts\relay_performance.ps1 -Events 500
 # 3 轮 × 批大小 10/50/100，采集吞吐、P95/P99、CPU 和内存

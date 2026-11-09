@@ -1,0 +1,32 @@
+services:
+  postgres:
+    ports: !reset []
+  rabbitmq:
+    ports: !reset []
+  redis:
+    ports: !reset []
+  mailpit:
+    ports: !reset []
+  api:
+    ports: !reset []
+    environment:
+      HIREFLOW_ALLOWED_HOSTS: localhost,127.0.0.1,load-balancer
+  outbox-relay:
+    ports: !reset []
+  notification-consumer:
+    ports: !reset []
+  load-balancer:
+    image: nginx:1.27-alpine
+    ports:
+      - "127.0.0.1:18000:8080"
+    volumes:
+      - ./deploy/nginx/cache-scale.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/health/live"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+

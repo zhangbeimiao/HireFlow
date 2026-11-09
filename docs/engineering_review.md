@@ -54,6 +54,7 @@
 
 - 职位与候选人列表采用 Cache Aside；Key 由版本、`tenant_id`、资源类型组成，避免跨租户串数据。创建与更新在数据库提交成功后删除当前租户 Key，TTL 默认 60 秒作为最终收敛边界。
 - 热缓存命中路径不建立 PostgreSQL 会话；MISS、显式 `Cache-Control: no-cache` 或 Redis 故障才执行 RLS 约束下的数据库查询。Redis 读取异常 fail-open，业务正确性仍由 PostgreSQL 保证。
+- `multi_api_hot_key.ps1` 在隔离 Compose 项目中扩展 3 个 API 副本，经 Nginx 同步请求同一个冷 Key；响应实例 ID 证明多实例分发，并以 `MISS` 数量度量数据库回源放大倍数。验收阈值为 1 次回源，其余请求均复用 Redis 结果。
 - Prometheus 记录 hit/miss/error/bypass、进程内命中率、数据库回源耗时和失效结果。单元测试覆盖 MISS→HIT、TTL、失效、跨租户 Key 与 Redis 故障降级。
 - 一次本机 Locust 快照（10 用户、每类 20 条数据、每阶段 5 秒）中，数据库回源约 `208 RPS / P95 44ms / P99 100ms`，热缓存约 `295 RPS / P95 28ms / P99 48ms`。数据用于同环境回归，不外推为生产容量。
 

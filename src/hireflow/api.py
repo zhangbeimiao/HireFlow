@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import os
 import secrets
+import socket
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -240,6 +241,9 @@ def _refresh_credential(
 @app.middleware("http")
 async def security_headers(request, call_next):
     response = await call_next(request)
+    response.headers["X-HireFlow-Instance"] = os.getenv(
+        "HIREFLOW_INSTANCE_ID", socket.gethostname()
+    )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["X-Frame-Options"] = "DENY"
