@@ -73,3 +73,17 @@ Liveness 只回答进程是否活着，依赖抖动时不应通过重启制造�
 ### 项目如何保证测试结果可复现？
 
 开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前 Python 回归基线为 `67 passed, 12 skipped`；Docker CI 另执行 11 个真实集成测试和 1 条 Playwright E2E 流程，并覆盖 Ruff、Go race test、RLS、并发 `201/409`、多实例热点 Key、TLS、备份恢复、故障演练及依赖/镜像安全扫描。
+
+## 三个深挖题口述卡
+
+### 并发排期为什么不会重复成功？
+
+接口先在当前租户内检查候选人和面试官的活动面试，目的是尽早返回可读错误；真正的并发裁决由 PostgreSQL GiST 排他约束完成。约束使用 `tenant_id + resource_id + tstzrange(starts_at, ends_at, '[)')`，所以相邻两场可以共存，重叠写入只有一个事务能提交。服务只把 SQLSTATE `23P01` 映射为 `409`，其他完整性错误不会伪装成排期冲突。面试与 Outbox 在同一事务提交，因此写事件失败时排期也会回滚。
+
+### RLS 如何避免连接池串租户？
+
+JWT 验签后提取签名内的 `tenant_id`，API 在显式事务中用 `set_config('app.tenant_id', tenant_id, true)` 设置事务级上下文；RLS 同时配置 `USING` 和 `WITH CHECK`。提交或回滚后上下文自动失效，复用连接不会继承上一请求的租户。应用查询仍显式带 `tenant_id` 以获得清晰语义，核心父子表再用 `(tenant_id, id)` 复合外键防止跨租户脏关联。迁移账号与后台服务使用独立权限边界，不接受客户端传入租户上下文。
+
+### 消息可靠性究竟是什么语义？
+
+业务数据与 Outbox 在同一 PostgreSQL 事务落库，Go Relay 用 `FOR UPDATE SKIP LOCKED` 多实例领取，`lease_owner` 是 fencing token，慢 Confirm 时为批次尾部续租。RabbitMQ 发布同时使用持久化消息、Publisher Confirm 和 `mandatory + NotifyReturn`，避免 Broker ACK 但消息未路由。若 ACK 后 Relay 在标记 published 前崩溃，事件会重投，所以端到端明确是 at-least-once；Consumer 以 `(consumer_name, event_id)` 唯一键实现 Inbox 幂等。Outbox 解决不丢消息，Inbox 解决重复副作用，两者都不宣称 exactly-once。

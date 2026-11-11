@@ -4,6 +4,37 @@
 
 HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶段、结构化面试、评分卡、Offer 与通知闭环。项目重点解决并发抢占同一面试时段、招聘决策被并发覆盖、跨租户数据泄露和异步消息丢失等高风险问题。
 
+## 5 分钟可靠性 Demo
+
+一条脚本依次展示四项可重复验证的后端证据：并发排期恰好得到 `201 + 409`、RabbitMQ 中断后的 Outbox 恢复、跨租户读取返回 `404`，以及 API/Relay/Consumer 的 Prometheus 指标。
+
+```powershell
+docker compose up --build -d
+.\scripts\reliability_demo.ps1
+```
+
+完整讲解顺序、预期输出和失败排查见 [5 分钟可靠性 Demo 指南](docs/five_minute_demo.md)。
+
+## 架构图
+
+```mermaid
+flowchart LR
+    Client[招聘工作台 / API Client] --> API[FastAPI<br/>JWT + RBAC + RLS Context]
+    API <--> Redis[(Redis<br/>Cache Aside + Token Bucket)]
+    API --> PG[(PostgreSQL 16<br/>ATS + Audit + Outbox)]
+    PG --> Relay[Go Outbox Relay<br/>Lease + Confirm + Mandatory]
+    Relay --> MQ[(RabbitMQ<br/>Retry + DLQ)]
+    MQ --> Consumer[Notification Consumer<br/>Inbox Idempotency]
+    Consumer --> PG
+    PG --> Dispatcher[SMTP Dispatcher]
+    Dispatcher --> SMTP[Mailpit / SMTP Provider]
+    API --> Metrics[Prometheus Metrics]
+    Relay --> Metrics
+    Consumer --> Metrics
+```
+
+核心一致性边界在 PostgreSQL；Redis 故障可回源，RabbitMQ 故障由 Outbox 隔离，同步 API 不直接承担外部通知可用性。更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)，候选人删除、匿名化、保留期与备份处理见 [PII 生命周期说明](docs/data_lifecycle.md)。
+
 ## 技术栈
 
 `Python 3.11+` · `Go 1.27` · `FastAPI` · `pgx` · `PostgreSQL 16 + RLS` · `SQLAlchemy Async` · `Alembic` · `Redis` · `RabbitMQ` · `SMTP/Mailpit` · `Docker Compose` · `pytest` · `Playwright` · `Go test` · `Locust` · `Prometheus`
@@ -19,23 +50,6 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效、TTL 兜底，并用短租约合并并发回源。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
 
-## 架构
-
-```text
-Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
-                    │                                  ├─ interviews + audit + outbox
-                    │                                  └─ inbox + in-app notifications + email deliveries
-                    ▼
-          Go Outbox Relay → RabbitMQ → Python Notification Consumer
-          (pgx + Confirm)          ├─ retry queue (5s)
-                                   └─ DLQ + Owner replay
-                                               │
-                                               ▼
-                                  SMTP Dispatcher → Mailpit / SMTP Provider
-```
-
-更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)，候选人删除、匿名化、保留期与备份处理见 [PII 生命周期说明](docs/data_lifecycle.md)，生产 Compose、TLS、密钥轮换、备份恢复与迁移回滚见 [生产运维说明](docs/production_operations.md)。
-
 ## 运行截图
 
 以下图片来自本地 Docker Compose 环境的真实验收流程，使用虚构企业和候选人数据；采集与脱敏说明见 [截图说明](docs/screenshots/README.md)。
@@ -47,16 +61,6 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
 | 数据库并发冲突保护 | Prometheus 指标 |
 | --- | --- |
 | ![排期冲突返回 409](docs/screenshots/03-scheduling-conflict.jpg) | ![Prometheus 指标](docs/screenshots/04-prometheus-metrics.jpg) |
-
-## 5 分钟可靠性 Demo
-
-项目演示聚焦四条可重复验证的后端证据：并发排期 `201/409`、RabbitMQ 中断后的 Outbox 重试、跨租户读取拒绝，以及 API/Relay/Consumer 三个进程的 Prometheus 指标。Docker Compose 已就绪后只需运行：
-
-```powershell
-.\scripts\reliability_demo.ps1
-```
-
-演示口径、预期输出、逐分钟讲解和失败排查见 [5 分钟可靠性 Demo 指南](docs/five_minute_demo.md)。
 
 ## 快速启动
 
