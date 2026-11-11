@@ -50,7 +50,9 @@ Broker ACK 与 PostgreSQL 状态更新不是一个原子事务。如果消息已
 
 ### 目前有哪些边界？
 
-SMTP Provider、模板、投递记录和失败重试已实现，本地使用 Mailpit 验收，但没有绑定真实生产供应商账号和投递 SLA；TLS 演练使用一次性测试 CA，生产仍需接入托管 PKI 和证书轮换；备份演练目前验证逻辑备份恢复，尚未覆盖 WAL 归档与时间点恢复；限流仍使用固定窗口，生产场景可按流量演进。
+当前版本已验证排期一致性、可靠投递和幂等消费；后台最小权限、事件严格排序和 Outbox 生命周期治理属于规模化部署前的下一阶段演进，已记录为明确的工程待办。
+
+SMTP Provider、模板、投递记录和失败重试已实现，本地使用 Mailpit 验收，但没有绑定真实生产供应商账号和投递 SLA；TLS 演练使用一次性测试 CA，生产仍需接入托管 PKI 和证书轮换；备份演练目前验证逻辑备份恢复，尚未覆盖 WAL 归档与时间点恢复；限流已使用 Redis Token Bucket，但可信代理 CIDR、容量和分层配额仍需结合真实流量校准。
 
 ### Refresh Token 为什么要做 Family？
 
@@ -70,4 +72,4 @@ Liveness 只回答进程是否活着，依赖抖动时不应通过重启制造�
 
 ### 项目如何保证测试结果可复现？
 
-开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前基线包含 51 个单元测试、8 个 ATS/认证集成测试和 1 条 Playwright E2E 流程；CI 还执行 Ruff、Go race test、RLS、并发 `201/409`、多实例热点 Key、TLS、备份恢复、故障演练及依赖/镜像安全扫描。
+开发环境由 Docker Compose 固化，Alembic 脚本在独立空数据库执行 `head → base → head`，黑盒测试通过真实 HTTP 接口而不是直接调用 Service。当前 Python 回归基线为 `67 passed, 12 skipped`；Docker CI 另执行 11 个真实集成测试和 1 条 Playwright E2E 流程，并覆盖 Ruff、Go race test、RLS、并发 `201/409`、多实例热点 Key、TLS、备份恢复、故障演练及依赖/镜像安全扫描。

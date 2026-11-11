@@ -6,14 +6,14 @@
 
 | 风险 | 当前设计 | 依据 |
 | --- | --- | --- |
-| 同一面试官重复排期 | PostgreSQL GiST 排他约束最终裁决 | 并发脚本稳定验证一个 `201`、一个 `409`。 |
-| 跨租户数据泄露 | JWT 内携带 `tenant_id`，所有资源查询限定当前租户 | 安全脚本验证跨租户查询 `404`。 |
+| 候选人或面试官重复排期 | PostgreSQL GiST 双维度排他约束最终裁决 | 并发脚本稳定验证一个 `201`、一个 `409`；数据库测试覆盖不同面试官下的候选人撞期。 |
+| 跨租户数据泄露或脏关联 | JWT + RLS 隔离读取，核心调度聚合使用 `(tenant_id, id)` 复合外键 | 安全脚本验证跨租户查询 `404`，数据库测试验证跨租户引用被拒绝。 |
 | 数据提交成功但消息未发送 | 业务事务内写 Outbox，Relay 异步投递 | 消除双写窗口，允许至少一次投递。 |
-| Relay 并发抢占或 Broker 中断 | Go Relay 原子 `SKIP LOCKED` 抢占、Publisher Confirm、租约与持久化退避 | PostgreSQL 并发测试和 RabbitMQ 中断恢复脚本覆盖。 |
+| Relay 并发抢占、租约 ABA 或 Broker 中断 | Go Relay 原子 `SKIP LOCKED` 抢占、每批 UUID `lease_owner` fencing、Publisher Confirm 与持久化退避 | PostgreSQL 测试验证旧 owner 在租约过期后不能更新，RabbitMQ 中断恢复脚本覆盖。 |
 | 消息重复消费 | Inbox 和 Notification 的唯一键幂等 | Relay 重投不会重复创建站内信。 |
 | 邮件供应商超时或宕机 | 持久化 Delivery、租约、稳定 Message-ID 与指数退避 | 故障脚本验证失败证据、恢复后发送及无重复行。 |
 | 招聘决策并发覆盖或跨表不一致 | Application/Offer 状态机、版本乐观锁、审计与同事务 Outbox | ATS 脚本验证非法/过期更新 `409`、评分卡锁定、Offer 接受自动录用。 |
-| 突发请求压垮认证与写接口 | Redis 固定窗口限流 | 限流脚本验证第 11 次失败登录返回 `429`。 |
+| 突发请求压垮认证、写接口或核心列表 | Redis 原子 Token Bucket，认证按可信客户端 IP，登录后叠加租户与用户配额 | 限流脚本验证失败登录最终返回 `429`；非可信代理的转发 IP 不参与 Key。 |
 | 重复列表查询增加数据库负载 | 租户级 Redis Cache Aside，提交后失效、TTL 兜底 | 单测覆盖隔离/失效/降级，Locust 对比数据库回源与热缓存。 |
 | 热点 Key 失效后并发回源 | Redis 短租约锁与等待者复用重建结果 | 并发单测验证两个 MISS 竞争只执行一次 loader；Redis 异常仍 fail-open。 |
 | JWT 密钥轮换和长会话 | JWT `kid` 多密钥验签，HttpOnly Cookie + CSRF，Refresh Token Family 仅存摘要 | 单测覆盖新旧密钥重叠窗口；黑盒测试覆盖 Cookie 属性、CSRF、轮换、家族重放撤销与登出。 |
@@ -41,7 +41,7 @@
 ## 阶段二：数据库级租户隔离
 
 - API 使用非表所有者 `hireflow_app` 账号；该账号没有超级权限、建库权限、建角色权限或继承权限。
-- PostgreSQL 对所有租户表启用并强制 RLS；每个 API 请求在验证 JWT 后设置 `app.tenant_id`，连接归还池前主动清空该变量。
+- PostgreSQL 对所有租户表启用并强制 RLS；验证 JWT 后通过事务级 `set_config(..., true)` 设置 `app.tenant_id`，每次新事务自动重设，提交或回滚即由 PostgreSQL 清除，避免连接池复用串租户。
 - `scripts/rls_smoke.ps1` 用受限账号直连数据库验证：没有上下文无法读取；指定 A 租户后可读 A，仍不能读取 B。应用层 `tenant_id` 条件从此是易读性与错误语义保障，RLS 才是数据库最后防线。
 
 ## 阶段三：可靠消息与故障恢复

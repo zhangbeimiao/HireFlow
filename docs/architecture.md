@@ -25,7 +25,7 @@ Go Outbox Relay ──> RabbitMQ ──> Python Notification Consumer ──> Po
 
 Relay 是本项目刻意划出的 Go 服务边界：它没有招聘领域 API，只负责高并发抢占、可靠发布和故障恢复。单条 PostgreSQL CTE 使用 `FOR UPDATE SKIP LOCKED` 选择可投递或租约过期事件，并原子更新为 `publishing`，因此多个实例不会正常抢到同一行。
 
-每条消息以 Outbox ID 作为 `message_id`，使用持久化 Delivery Mode；收到 RabbitMQ Publisher Confirm 后才将数据库状态更新为 `published`。如果 Broker 已确认但数据库更新失败，事件会在租约过期后重投，所以系统明确保持 At-least-once，并由 Python Consumer 的 Inbox 唯一键消除重复副作用。发布失败则回写 `pending + next_attempt_at`，按指数退避重试；连接关闭会立即让 Relay readiness 变为 `503`，重连后继续处理积压。
+每条消息以 Outbox ID 作为 `message_id`，使用持久化 Delivery Mode；发布采用 `mandatory=true`，只有消息未被 Broker return 且收到 Publisher Confirm 后才将数据库状态更新为 `published`。Relay 在顺序处理批次时会为尚未发布的尾部事件续租，续租与状态更新都校验 owner fencing token。若 Broker 已确认但数据库更新失败，事件会在租约过期后重投，所以系统明确保持 At-least-once，并由 Python Consumer 的 Inbox 唯一键消除重复副作用。发布失败则回写 `pending + next_attempt_at`，按指数退避重试；连接关闭会立即让 Relay readiness 变为 `503`，重连后继续处理积压。
 
 SIGTERM 到来后 Relay 停止新抢占，批次内尚未发布的事件恢复为可重试状态。Python Relay 仍位于 `python-relay` Compose profile，作为回退与对照实现，默认栈只运行 Go Relay。
 
@@ -112,6 +112,12 @@ count, then sent to a 5-second retry queue. After three total deliveries the con
 message to `hireflow.events.dlq`; this explicit publish keeps upgrades compatible with queues created by
 older versions. An Owner can list failed deliveries and request a replay through the admin API; the consumer
 durably claims those requests and republishes the original payload.
+
+通知文案使用 Outbox payload 中的发生时快照，例如 `starts_at`、`to_status` 和
+`to_stage`；数据库回查只用于租户边界和收件人关系校验。这样延迟消费
+`interview.scheduled` 时，即使面试后来已经取消，也不会把“已安排”事件错误渲染成取消态。
+当前 Inbox 解决重复副作用，但尚未承诺同一聚合跨 Relay 的严格顺序；需要严格顺序的下游应在
+事件模型引入 `aggregate_version` 和消费者版本水位后再启用。
 
 The consumer also creates one `notification_deliveries` row per recipient/channel in the same
 transaction as the in-app notification. A separate SMTP Dispatcher claims pending rows with

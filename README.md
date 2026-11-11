@@ -14,7 +14,7 @@ HireFlow 面向中小企业招聘场景，覆盖职位、候选人、申请阶�
 - **可靠排期**：候选人与面试官时段取交集并扣除活动面试；使用半开区间 `[start, end)`，PostgreSQL GiST 排他约束是并发写入最终裁决。
 - **状态与审计**：状态机、乐观锁版本号和状态变更审计记录。
 - **ATS 招聘闭环**：Application 与 Offer 使用显式状态机和乐观锁；支持职位面试轮次、面试官评分卡及提交后不可修改；接受 Offer 后申请在同一事务内进入 `hired`，所有关键变更同时写审计与 Outbox。
-- **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、租约和 Publisher Confirm 实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
+- **Go 可靠消息 Relay**：事务内写 Outbox；独立 Go 服务通过 pgx、`FOR UPDATE SKIP LOCKED`、owner fencing、批内续租、Publisher Confirm 与 mandatory return 检查实现并发抢占、持久化退避及故障恢复；Python Relay 仅作为可选回退。
 - **幂等通知与邮件**：Python Consumer 的 Inbox 按 `(consumer_name, event_id)` 去重；站内信与邮件 Delivery 在同一事务落库。独立 SMTP Dispatcher 使用租约、指数退避和稳定 Message-ID 投递，区分超时/限流/临时与永久失败；模板版本、供应商状态、送达与退信事件均可追踪且事件回调幂等。
 - **查询与缓存治理**：职位、候选人、面试与通知列表采用稳定的 Keyset/Cursor 分页和租户复合索引；职位/候选人默认热点首页使用 Redis Cache Aside，写后失效、TTL 兜底，并用短租约合并并发回源。
 - **招聘工作台**：内置中文 Web 控制台，支持初始化/登录团队、职位与候选人、申请阶段、面试轮次、排期、评分卡及 Offer 操作；提供 ATS 列表、详情、审计时间线和通知列表，排期与乐观锁冲突直接呈现为 `409 Conflict`。
@@ -34,7 +34,7 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
                                   SMTP Dispatcher → Mailpit / SMTP Provider
 ```
 
-更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)，生产 Compose、TLS、密钥轮换、备份恢复与迁移回滚见 [生产运维说明](docs/production_operations.md)。
+更多设计取舍见 [架构文档](docs/architecture.md)，接口权限与状态码见 [API 文档](docs/api.md)，候选人删除、匿名化、保留期与备份处理见 [PII 生命周期说明](docs/data_lifecycle.md)，生产 Compose、TLS、密钥轮换、备份恢复与迁移回滚见 [生产运维说明](docs/production_operations.md)。
 
 ## 运行截图
 
@@ -47,6 +47,16 @@ Client → FastAPI (JWT/RBAC, Redis Cache Aside + rate limit) → PostgreSQL
 | 数据库并发冲突保护 | Prometheus 指标 |
 | --- | --- |
 | ![排期冲突返回 409](docs/screenshots/03-scheduling-conflict.jpg) | ![Prometheus 指标](docs/screenshots/04-prometheus-metrics.jpg) |
+
+## 5 分钟可靠性 Demo
+
+项目演示聚焦四条可重复验证的后端证据：并发排期 `201/409`、RabbitMQ 中断后的 Outbox 重试、跨租户读取拒绝，以及 API/Relay/Consumer 三个进程的 Prometheus 指标。Docker Compose 已就绪后只需运行：
+
+```powershell
+.\scripts\reliability_demo.ps1
+```
+
+演示口径、预期输出、逐分钟讲解和失败排查见 [5 分钟可靠性 Demo 指南](docs/five_minute_demo.md)。
 
 ## 快速启动
 
@@ -113,7 +123,7 @@ python -m pytest -q -m integration tests/integration/test_ats_api.py
 
 CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 源码/镜像扫描，并验证 API、Consumer 与 Go Relay 均以非 root 用户运行。应用不启用宽松 CORS；允许的 Host、数据库/RabbitMQ/Grafana 密码和 JWT 密钥必须通过环境注入。
 
-当前回归基线为 `53` 个 Python 单元测试、`8` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP 黑盒 ATS/认证集成测试和 `1` 条 Playwright 完整招聘流程；CI 还执行 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
+当前 Python 回归基线为 `67 passed, 12 skipped`；Docker CI 另执行 `11` 个真实 HTTP/PostgreSQL/RabbitMQ/SMTP/数据库约束集成测试和 `1` 条 Playwright 完整招聘流程，并覆盖 Alembic 升降级、RLS、缓存、并发排期、故障恢复、Go `vet/test -race` 与容器安全验收。
 
 | 脚本 | 验证结果 |
 | --- | --- |
@@ -127,9 +137,10 @@ CI 还会运行 `pip-audit`、`govulncheck`、Gitleaks Git 历史扫描、Trivy 
 | `tls_smoke.ps1` | 一次性 CA 签发真实证书，验证 PostgreSQL `verify-full` 查询与 RabbitMQ 双向 TLS 1.3 握手。 |
 | `backup_restore_smoke.ps1` | 逻辑备份恢复到随机临时库，对 20 张表比较精确行数和内容哈希，源库只读。 |
 | `security_smoke.ps1` | 无 Token `401`、越权 `403`、跨租户读取 `404`。 |
-| `rate_limit_smoke.ps1` | 连续 11 次无效登录，第 11 次 `429`。 |
+| `rate_limit_smoke.ps1` | 清理测试专用登录桶后连续发起无效登录，验证 Token Bucket 最终返回 `429` 与 `Retry-After`。 |
 | `observability_smoke.ps1` | 验证请求 ID，以及 API/连接池、排期冲突、Outbox、通知失败三类进程指标。 |
-| `concurrency_smoke.ps1` | 两位候选人并发抢唯一时段：恰好一个 `201`、一个 `409`。 |
+| `concurrency_smoke.ps1` | 并发抢唯一时段：恰好一个 `201`、一个 `409`；数据库另以候选人和面试官双维度排他约束防止撞期。 |
+| `reliability_demo.ps1` | 依次串联并发 `201/409`、Outbox 故障恢复、跨租户拒绝与 Prometheus 指标，形成一条 5 分钟证据链。 |
 | `load_test.ps1` | Locust 并发压测同一唯一时段；输出吞吐、P95/P99，并要求恰好一个 `201`、其余为预期 `409`。 |
 | `failure_drill.ps1` | 统一演练 Relay/Consumer 重启、Inbox 幂等与人工重放、RabbitMQ 中断恢复、Redis 回源降级，以及 PostgreSQL 故障时 `readiness=503`、`liveness=200`；恢复后验证消息无丢失且副作用不重复。 |
 | `rls_smoke.ps1` | 以 API 受限数据库账号直连验证：无租户上下文为 0 行；A 可读 A、不可读 B。 |
@@ -170,6 +181,8 @@ EXCLUDE USING gist (
 应用层预检只用于快速返回友好错误；即使多个实例同时通过预检，最终仍只有一个重叠排期可提交，竞争请求返回 `409 Conflict`。
 
 ## 当前边界
+
+当前版本已验证排期一致性、可靠投递和幂等消费；后台最小权限、事件严格排序和 Outbox 生命周期治理属于规模化部署前的下一阶段演进，已记录为明确的工程待办。
 
 - 默认开发环境使用 Mailpit 接收真实 SMTP 邮件；生产环境仍需配置受信任邮件供应商、域名认证与发送配额。
 - Redis 用于列表缓存、回源请求合并和限流，但不承担排期正确性；Redis 故障时列表读取降级回 PostgreSQL，排期始终由 PostgreSQL 约束裁决。

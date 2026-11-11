@@ -77,7 +77,7 @@ Content-Type: application/json
 }
 ```
 
-创建成功返回 `201 Created`。若另一请求已为同一面试官占用重叠时段，则返回：
+创建成功返回 `201 Created`。若另一请求已为同一候选人或面试官占用重叠时段，则返回对应的 `409`，例如：
 
 ```http
 409 Conflict
