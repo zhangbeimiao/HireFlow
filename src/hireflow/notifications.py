@@ -28,33 +28,41 @@ class InvalidEvent(ValueError):
     pass
 
 
-def _message_for(event_type: str, interview: Interview) -> tuple[str, str]:
+def _snapshot_value(payload: dict, name: str) -> str:
+    value = payload.get(name)
+    if value is None or str(value).strip() == "":
+        raise InvalidEvent(f"event payload is missing {name}")
+    return str(value)
+
+
+def _message_for(event_type: str, payload: dict) -> tuple[str, str]:
     if event_type == "interview.scheduled":
-        return "面试已安排", f"面试时间：{interview.starts_at.isoformat()}"
+        return "面试已安排", f"面试时间：{_snapshot_value(payload, 'starts_at')}"
     if event_type == "interview.rescheduled":
-        return "面试时间已调整", f"新的面试时间：{interview.starts_at.isoformat()}"
+        return "面试时间已调整", f"新的面试时间：{_snapshot_value(payload, 'starts_at')}"
     if event_type == "interview.status_changed":
-        if interview.status == "confirmed":
-            return "面试已确认", f"面试已确认，时间：{interview.starts_at.isoformat()}"
-        if interview.status == "cancelled":
+        status = _snapshot_value(payload, "to_status")
+        if status == "confirmed":
+            return "面试已确认", f"面试已确认，时间：{_snapshot_value(payload, 'starts_at')}"
+        if status == "cancelled":
             return "面试已取消", "该场面试已取消，请等待招聘方后续安排。"
-        return "面试状态已更新", f"当前状态：{interview.status}"
+        return "面试状态已更新", f"事件发生时状态：{status}"
     raise InvalidEvent(f"unsupported event type: {event_type}")
 
 
-def _application_message(event_type: str, application: Application) -> tuple[str, str]:
+def _application_message(event_type: str, payload: dict) -> tuple[str, str]:
     if event_type == "application.created":
         return "申请已进入流程", "招聘团队已收到你的申请。"
     if event_type == "application.stage_changed":
-        return "申请进度已更新", f"当前阶段：{application.stage}"
+        return "申请进度已更新", f"事件发生时阶段：{_snapshot_value(payload, 'to_stage')}"
     raise InvalidEvent(f"unsupported event type: {event_type}")
 
 
-def _offer_message(event_type: str, offer: Offer) -> tuple[str, str]:
+def _offer_message(event_type: str, payload: dict) -> tuple[str, str]:
     if event_type == "offer.created":
         return "Offer 正在准备", "招聘团队已开始准备录用方案。"
     if event_type == "offer.status_changed":
-        return "Offer 状态已更新", f"当前状态：{offer.status}"
+        return "Offer 状态已更新", f"事件发生时状态：{_snapshot_value(payload, 'to_status')}"
     raise InvalidEvent(f"unsupported event type: {event_type}")
 
 
@@ -64,6 +72,9 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
         event_id = str(event["id"])
         tenant_id = UUID(str(event["tenant_id"]))
         event_type = str(event["event_type"])
+        payload = event["payload"]
+        if not isinstance(payload, dict):
+            raise TypeError("payload must be an object")
     except (KeyError, ValueError, TypeError) as error:
         raise InvalidEvent("event is missing a valid id or tenant_id") from error
 
@@ -103,7 +114,7 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
     recipients: list[tuple[str, UUID]]
     if event_type.startswith("interview."):
         try:
-            interview_id = UUID(str(event["payload"]["interview_id"]))
+            interview_id = UUID(str(payload["interview_id"]))
         except (KeyError, ValueError, TypeError) as error:
             raise InvalidEvent("interview event is missing interview_id") from error
         interview = await session.scalar(
@@ -111,14 +122,14 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
         )
         if interview is None:
             raise InvalidEvent("event references an interview outside its tenant")
-        title, content = _message_for(event_type, interview)
+        title, content = _message_for(event_type, payload)
         recipients = [
             ("candidate", interview.candidate_id),
             ("interviewer", interview.interviewer_id),
         ]
     elif event_type.startswith("application."):
         try:
-            application_id = UUID(str(event["payload"]["application_id"]))
+            application_id = UUID(str(payload["application_id"]))
         except (KeyError, ValueError, TypeError) as error:
             raise InvalidEvent("application event is missing application_id") from error
         application = await session.scalar(
@@ -128,11 +139,11 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
         )
         if application is None:
             raise InvalidEvent("event references an application outside its tenant")
-        title, content = _application_message(event_type, application)
+        title, content = _application_message(event_type, payload)
         recipients = [("candidate", application.candidate_id)]
     elif event_type.startswith("offer."):
         try:
-            offer_id = UUID(str(event["payload"]["offer_id"]))
+            offer_id = UUID(str(payload["offer_id"]))
         except (KeyError, ValueError, TypeError) as error:
             raise InvalidEvent("offer event is missing offer_id") from error
         row = await session.execute(
@@ -143,12 +154,12 @@ async def consume_notification_event(session: AsyncSession, event: dict) -> None
         offer_row = row.one_or_none()
         if offer_row is None:
             raise InvalidEvent("event references an offer outside its tenant")
-        offer, application = offer_row
-        title, content = _offer_message(event_type, offer)
+        _offer, application = offer_row
+        title, content = _offer_message(event_type, payload)
         recipients = [("candidate", application.candidate_id)]
     elif event_type == "scorecard.submitted":
         try:
-            interview_id = UUID(str(event["payload"]["interview_id"]))
+            interview_id = UUID(str(payload["interview_id"]))
         except (KeyError, ValueError, TypeError) as error:
             raise InvalidEvent("scorecard event is missing interview_id") from error
         row = await session.execute(

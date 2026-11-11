@@ -97,10 +97,29 @@ func run(ctx context.Context, logger *slog.Logger, cfg config.Config, repository
 			continue
 		}
 		relayMetrics.Claims.Add(float64(len(events)))
+		var leaseExpiresAt time.Time
+		if len(events) > 0 {
+			leaseExpiresAt = events[0].LeaseExpiresAt
+		}
 		for index, event := range events {
 			if ctx.Err() != nil {
 				releaseEvents(logger, repository, events[index:])
 				return
+			}
+			if shouldRenewLease(time.Now(), leaseExpiresAt, cfg.PublishTimeout) {
+				renewCtx, renewCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				renewedUntil, renewErr := repository.RenewLease(renewCtx, events[index:], cfg.LeaseDuration)
+				renewCancel()
+				if renewErr != nil {
+					logger.Warn("could not renew remaining batch lease", "event_id", event.ID, "remaining", len(events)-index, "error", renewErr)
+					releaseEvents(logger, repository, events[index:])
+					break
+				}
+				leaseExpiresAt = renewedUntil
+				for remaining := index; remaining < len(events); remaining++ {
+					events[remaining].LeaseExpiresAt = renewedUntil
+				}
+				logger.Debug("renewed remaining batch lease", "remaining", len(events)-index, "lease_expires_at", renewedUntil)
 			}
 			publishCtx, cancel := context.WithTimeout(context.Background(), cfg.PublishTimeout)
 			started := time.Now()
@@ -118,7 +137,7 @@ func run(ctx context.Context, logger *slog.Logger, cfg config.Config, repository
 			}
 
 			updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			err = repository.MarkPublished(updateCtx, event.ID)
+			err = repository.MarkPublished(updateCtx, event.ID, event.LeaseOwner)
 			updateCancel()
 			if err != nil {
 				relayMetrics.Events.WithLabelValues("state_update_failure").Inc()
@@ -139,11 +158,20 @@ func run(ctx context.Context, logger *slog.Logger, cfg config.Config, repository
 	}
 }
 
+func shouldRenewLease(now, leaseExpiresAt time.Time, publishTimeout time.Duration) bool {
+	if leaseExpiresAt.IsZero() {
+		return true
+	}
+	// One timeout covers the next Confirm and another two cover the fenced
+	// state update plus scheduling jitter before the following iteration.
+	return !leaseExpiresAt.After(now.Add(3 * publishTimeout))
+}
+
 func releaseEvents(logger *slog.Logger, repository *outbox.Repository, events []outbox.Event) {
 	releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer releaseCancel()
 	for _, event := range events {
-		if err := repository.MarkFailed(releaseCtx, event.ID, event.Attempts); err != nil {
+		if err := repository.MarkFailed(releaseCtx, event.ID, event.LeaseOwner, event.Attempts); err != nil {
 			logger.Warn("event remains protected by lease", "event_id", event.ID, "error", err)
 		}
 	}

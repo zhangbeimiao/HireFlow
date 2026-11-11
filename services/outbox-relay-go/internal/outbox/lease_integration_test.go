@@ -2,6 +2,7 @@ package outbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -129,5 +130,71 @@ func TestExpiredLeaseCanBeReclaimed(t *testing.T) {
 	}
 	if reclaimed[0].ID != first[0].ID || reclaimed[0].Attempts != 2 {
 		t.Fatalf("reclaimed event = %s attempts=%d, want %s attempts=2", reclaimed[0].ID, reclaimed[0].Attempts, first[0].ID)
+	}
+	if reclaimed[0].LeaseOwner == first[0].LeaseOwner {
+		t.Fatal("reclaimed event must receive a new lease owner token")
+	}
+
+	if err := firstRelay.MarkPublished(fixture.ctx, first[0].ID, first[0].LeaseOwner); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale relay MarkPublished error = %v, want ErrLeaseLost", err)
+	}
+	if err := firstRelay.MarkFailed(fixture.ctx, first[0].ID, first[0].LeaseOwner, first[0].Attempts); !errors.Is(err, ErrLeaseLost) {
+		t.Fatalf("stale relay MarkFailed error = %v, want ErrLeaseLost", err)
+	}
+	if err := secondRelay.MarkPublished(fixture.ctx, reclaimed[0].ID, reclaimed[0].LeaseOwner); err != nil {
+		t.Fatalf("active relay MarkPublished: %v", err)
+	}
+
+	var status string
+	var leaseOwner *uuid.UUID
+	if err := fixture.pool.QueryRow(fixture.ctx, "SELECT status, lease_owner FROM outbox_events WHERE id = $1", first[0].ID).Scan(&status, &leaseOwner); err != nil {
+		t.Fatalf("query final event state: %v", err)
+	}
+	if status != "published" || leaseOwner != nil {
+		t.Fatalf("final event status=%s lease_owner=%v, want published with no owner", status, leaseOwner)
+	}
+}
+
+func TestRenewLeaseProtectsRemainingBatchDuringSlowConfirmations(t *testing.T) {
+	fixture := newRelayIntegrationFixture(t)
+	fixture.insertEvents(t, 3)
+	firstRelay := NewRepository(fixture.pool)
+	secondRelay := NewRepository(fixture.pool)
+
+	events, err := firstRelay.Claim(fixture.ctx, 3, 200*time.Millisecond)
+	if err != nil || len(events) != 3 {
+		t.Fatalf("first claim returned %d events, error %v", len(events), err)
+	}
+	originalExpiry := events[1].LeaseExpiresAt
+
+	// Simulate a slow Confirm for the first event consuming most of the shared
+	// batch lease, then finalize it before renewing only the unprocessed tail.
+	time.Sleep(120 * time.Millisecond)
+	if err := firstRelay.MarkPublished(fixture.ctx, events[0].ID, events[0].LeaseOwner); err != nil {
+		t.Fatalf("mark first slow-confirmed event published: %v", err)
+	}
+	renewedUntil, err := firstRelay.RenewLease(fixture.ctx, events[1:], 400*time.Millisecond)
+	if err != nil {
+		t.Fatalf("renew remaining batch: %v", err)
+	}
+	if !renewedUntil.After(originalExpiry) {
+		t.Fatalf("renewed expiry %s did not extend original expiry %s", renewedUntil, originalExpiry)
+	}
+
+	// The original shared lease is now expired. A competing Relay still must not
+	// reclaim either remaining event because their owner-fenced lease was renewed.
+	time.Sleep(120 * time.Millisecond)
+	reclaimed, err := secondRelay.Claim(fixture.ctx, 3, time.Minute)
+	if err != nil {
+		t.Fatalf("competing claim after original expiry: %v", err)
+	}
+	if len(reclaimed) != 0 {
+		t.Fatalf("competing Relay reclaimed %d renewed events", len(reclaimed))
+	}
+
+	for _, event := range events[1:] {
+		if err := firstRelay.MarkPublished(fixture.ctx, event.ID, event.LeaseOwner); err != nil {
+			t.Fatalf("mark renewed event %s published: %v", event.ID, err)
+		}
 	}
 }

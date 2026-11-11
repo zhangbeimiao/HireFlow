@@ -97,45 +97,51 @@ def create_access_token(user_id: UUID, tenant_id: UUID, role: UserRole | str) ->
     )
 
 
+def decode_access_token(token: str) -> Principal:
+    """Validate a bearer token and return the signed rate-limit/RBAC identity."""
+
+    keys, _ = _signing_keys()
+    header = jwt.get_unverified_header(token)
+    key_id = header.get("kid")
+    if not isinstance(key_id, str) or key_id not in keys:
+        raise jwt.InvalidKeyError("unknown JWT key id")
+    claims = jwt.decode(
+        token,
+        keys[key_id],
+        algorithms=["HS256"],
+        audience=JWT_AUDIENCE,
+        issuer=JWT_ISSUER,
+        options={
+            "require": [
+                "sub",
+                "tenant_id",
+                "role",
+                "iat",
+                "nbf",
+                "exp",
+                "iss",
+                "aud",
+                "jti",
+                "token_type",
+            ]
+        },
+    )
+    if claims["token_type"] != "access":
+        raise jwt.InvalidTokenError("token is not an access token")
+    return Principal(
+        user_id=UUID(claims["sub"]),
+        tenant_id=UUID(claims["tenant_id"]),
+        role=UserRole(claims["role"]),
+    )
+
+
 def current_principal(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer_scheme),
 ) -> Principal:
     if credentials is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
     try:
-        keys, _ = _signing_keys()
-        header = jwt.get_unverified_header(credentials.credentials)
-        key_id = header.get("kid")
-        if not isinstance(key_id, str) or key_id not in keys:
-            raise jwt.InvalidKeyError("unknown JWT key id")
-        claims = jwt.decode(
-            credentials.credentials,
-            keys[key_id],
-            algorithms=["HS256"],
-            audience=JWT_AUDIENCE,
-            issuer=JWT_ISSUER,
-            options={
-                "require": [
-                    "sub",
-                    "tenant_id",
-                    "role",
-                    "iat",
-                    "nbf",
-                    "exp",
-                    "iss",
-                    "aud",
-                    "jti",
-                    "token_type",
-                ]
-            },
-        )
-        if claims["token_type"] != "access":
-            raise jwt.InvalidTokenError("token is not an access token")
-        return Principal(
-            user_id=UUID(claims["sub"]),
-            tenant_id=UUID(claims["tenant_id"]),
-            role=UserRole(claims["role"]),
-        )
+        return decode_access_token(credentials.credentials)
     except (jwt.PyJWTError, KeyError, ValueError) as error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid bearer token"

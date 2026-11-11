@@ -15,7 +15,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 # and production rate-limit settings remain untouched.
 $keys = @(
     & $docker compose exec -T redis redis-cli --scan `
-        --pattern "hireflow:rate-limit:POST:/v1/auth/bootstrap:*"
+        --pattern "hireflow:rate-limit:ip:*:POST:/v1/auth/bootstrap"
 )
 if ($LASTEXITCODE -ne 0) {
     throw "Could not enumerate bootstrap rate-limit fixture keys"

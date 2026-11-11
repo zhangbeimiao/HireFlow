@@ -47,6 +47,9 @@ func Load() (Config, error) {
 	if cfg.PublishTimeout, err = positiveDuration("HIREFLOW_PUBLISH_TIMEOUT", cfg.PublishTimeout); err != nil {
 		return Config{}, err
 	}
+	if cfg.LeaseDuration <= 3*cfg.PublishTimeout {
+		return Config{}, fmt.Errorf("HIREFLOW_OUTBOX_LEASE_DURATION must be greater than three times HIREFLOW_PUBLISH_TIMEOUT")
+	}
 	return cfg, nil
 }
 

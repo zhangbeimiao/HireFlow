@@ -2,8 +2,9 @@ import os
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session
 
 from hireflow.observability import DB_POOL_CONNECTIONS
 
@@ -20,12 +21,26 @@ DB_POOL_CONNECTIONS.labels(state="checked_out").set_function(_pool.checkedout)
 DB_POOL_CONNECTIONS.labels(state="overflow").set_function(_pool.overflow)
 
 
+TENANT_CONTEXT_KEY = "hireflow_tenant_id"
+
+
+@event.listens_for(Session, "after_begin")
+def _apply_transaction_tenant_context(session, _transaction, connection) -> None:
+    """Apply the verified tenant to every transaction opened by this ORM session."""
+
+    tenant_id = session.info.get(TENANT_CONTEXT_KEY)
+    if tenant_id is not None:
+        connection.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+
+
 async def _clear_tenant_context(session: AsyncSession) -> None:
-    """Rollback request work and persistently clear a custom GUC before pooling the connection."""
+    """Rollback request work; transaction-local GUC state then disappears automatically."""
     if session.in_transaction():
         await session.rollback()
-    await session.execute(text("SELECT set_config('app.tenant_id', '', false)"))
-    await session.commit()
+    session.info.pop(TENANT_CONTEXT_KEY, None)
 
 
 async def get_session():
@@ -38,11 +53,18 @@ async def get_session():
 
 
 async def set_tenant_context(session: AsyncSession, tenant_id: UUID) -> None:
-    """Bind the PostgreSQL RLS policy to the tenant from a verified JWT claim."""
-    await session.execute(
-        text("SELECT set_config('app.tenant_id', :tenant_id, false)"),
-        {"tenant_id": str(tenant_id)},
-    )
+    """Bind RLS to the verified tenant for the current and all later transactions."""
+
+    session.info[TENANT_CONTEXT_KEY] = tenant_id
+    if session.in_transaction():
+        await session.execute(
+            text("SELECT set_config('app.tenant_id', :tenant_id, true)"),
+            {"tenant_id": str(tenant_id)},
+        )
+    else:
+        # Starting a transaction invokes the after_begin hook above. This also makes the
+        # context effective before the caller's first business query.
+        await session.execute(text("SELECT 1"))
 
 
 async def get_tenant_session(tenant_id: UUID):

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -30,7 +31,10 @@ class Tenant(Base):
 
 class User(Base):
     __tablename__ = "users"
-    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_user_tenant_email"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_user_tenant_email"),
+        UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
@@ -57,6 +61,14 @@ class RefreshToken(Base):
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "id", name="uq_jobs_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "hiring_manager_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_jobs_tenant_hiring_manager",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
@@ -68,7 +80,10 @@ class Job(Base):
 
 class Candidate(Base):
     __tablename__ = "candidates"
-    __table_args__ = (UniqueConstraint("tenant_id", "email", name="uq_candidate_tenant_email"),)
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_candidate_tenant_email"),
+        UniqueConstraint("tenant_id", "id", name="uq_candidates_tenant_id"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
@@ -82,6 +97,17 @@ class Application(Base):
     __tablename__ = "applications"
     __table_args__ = (
         UniqueConstraint("tenant_id", "job_id", "candidate_id", name="uq_application"),
+        UniqueConstraint("tenant_id", "id", name="uq_applications_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "job_id"],
+            ["jobs.tenant_id", "jobs.id"],
+            name="fk_applications_tenant_job",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "candidate_id"],
+            ["candidates.tenant_id", "candidates.id"],
+            name="fk_applications_tenant_candidate",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -115,6 +141,12 @@ class InterviewRound(Base):
         UniqueConstraint("tenant_id", "job_id", "sequence", name="uq_interview_round_sequence"),
         CheckConstraint("sequence > 0", name="ck_interview_round_sequence_positive"),
         CheckConstraint("duration_minutes BETWEEN 15 AND 480", name="ck_interview_round_duration"),
+        UniqueConstraint("tenant_id", "id", name="uq_interview_rounds_tenant_id"),
+        ForeignKeyConstraint(
+            ["tenant_id", "job_id"],
+            ["jobs.tenant_id", "jobs.id"],
+            name="fk_interview_rounds_tenant_job",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
@@ -149,6 +181,33 @@ class InterviewerAvailability(Base):
 
 class Interview(Base):
     __tablename__ = "interviews"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "candidate_id"],
+            ["candidates.tenant_id", "candidates.id"],
+            name="fk_interviews_tenant_candidate",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "interviewer_id"],
+            ["users.tenant_id", "users.id"],
+            name="fk_interviews_tenant_interviewer",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "job_id"],
+            ["jobs.tenant_id", "jobs.id"],
+            name="fk_interviews_tenant_job",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "application_id"],
+            ["applications.tenant_id", "applications.id"],
+            name="fk_interviews_tenant_application",
+        ),
+        ForeignKeyConstraint(
+            ["tenant_id", "round_id"],
+            ["interview_rounds.tenant_id", "interview_rounds.id"],
+            name="fk_interviews_tenant_round",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), index=True)
@@ -247,6 +306,7 @@ class OutboxEvent(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    lease_owner: Mapped[UUID | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

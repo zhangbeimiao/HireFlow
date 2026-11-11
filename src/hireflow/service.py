@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -37,6 +38,34 @@ class InvalidTransition(Exception):
 
 class StaleVersion(Exception):
     pass
+
+
+logger = logging.getLogger(__name__)
+
+
+def _exclusion_conflict_message(error: IntegrityError) -> str | None:
+    """Return a public conflict message only for PostgreSQL exclusion violations."""
+
+    current: object | None = error.orig
+    sqlstate = None
+    constraint_name = None
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        sqlstate = (
+            sqlstate or getattr(current, "sqlstate", None) or getattr(current, "pgcode", None)
+        )
+        constraint_name = constraint_name or getattr(current, "constraint_name", None)
+        diagnostic = getattr(current, "diag", None)
+        constraint_name = constraint_name or getattr(diagnostic, "constraint_name", None)
+        current = getattr(current, "__cause__", None)
+    if sqlstate != "23P01":
+        return None
+    if constraint_name == "interview_no_overlapping_candidate":
+        return "candidate already has an overlapping active interview"
+    if constraint_name == "interview_no_overlapping_interviewer":
+        return "interviewer already has an overlapping active interview"
+    return "interview overlaps an existing active schedule"
 
 
 async def create_interview(
@@ -94,14 +123,20 @@ async def create_interview(
         select(Interview).where(
             and_(
                 Interview.tenant_id == tenant_id,
-                Interview.interviewer_id == payload.interviewer_id,
+                (
+                    (Interview.interviewer_id == payload.interviewer_id)
+                    | (Interview.candidate_id == payload.candidate_id)
+                ),
                 Interview.status.in_([status.value for status in ACTIVE_STATUSES]),
             )
         )
     )
     for current in existing:
         if overlaps(payload.starts_at, payload.ends_at, current.starts_at, current.ends_at):
-            raise SchedulingConflict("interviewer already has an overlapping active interview")
+            resource = (
+                "interviewer" if current.interviewer_id == payload.interviewer_id else "candidate"
+            )
+            raise SchedulingConflict(f"{resource} already has an overlapping active interview")
 
     interview = Interview(
         tenant_id=tenant_id,
@@ -149,12 +184,14 @@ async def create_interview(
         )
         await session.commit()
     except IntegrityError as error:
-        # The exclusion constraint is the final authority when two application instances
-        # pass the read-time probe concurrently. Keep its database error behind one 409 contract.
         await session.rollback()
-        raise SchedulingConflict(
-            "interviewer already has an overlapping active interview"
-        ) from error
+        message = _exclusion_conflict_message(error)
+        if message is not None:
+            # The exclusion constraints are the final authority when concurrent requests
+            # pass the friendly read-time probe.
+            raise SchedulingConflict(message) from error
+        logger.exception("unexpected integrity error while creating interview")
+        raise
     return interview
 
 
@@ -201,6 +238,7 @@ async def transition_interview(
                 "interview_id": str(interview_id),
                 "from_status": current.value,
                 "to_status": payload.status.value,
+                "starts_at": interview.starts_at.isoformat(),
                 "reason": payload.reason,
             },
         )
@@ -225,14 +263,20 @@ async def reschedule_interview(
     existing = await session.scalars(
         select(Interview).where(
             Interview.tenant_id == tenant_id,
-            Interview.interviewer_id == interview.interviewer_id,
+            (
+                (Interview.interviewer_id == interview.interviewer_id)
+                | (Interview.candidate_id == interview.candidate_id)
+            ),
             Interview.id != interview_id,
             Interview.status.in_([status.value for status in ACTIVE_STATUSES]),
         )
     )
     for current in existing:
         if overlaps(payload.starts_at, payload.ends_at, current.starts_at, current.ends_at):
-            raise SchedulingConflict("interviewer already has an overlapping active interview")
+            resource = (
+                "interviewer" if current.interviewer_id == interview.interviewer_id else "candidate"
+            )
+            raise SchedulingConflict(f"{resource} already has an overlapping active interview")
 
     old_starts_at = interview.starts_at
     old_ends_at = interview.ends_at
@@ -254,9 +298,7 @@ async def reschedule_interview(
         )
         if result.rowcount != 1:
             await session.rollback()
-            raise StaleVersion(
-                "interview was changed by another request; read it again and retry"
-            )
+            raise StaleVersion("interview was changed by another request; read it again and retry")
         session.add(
             InterviewAudit(
                 interview_id=interview_id,
@@ -283,9 +325,11 @@ async def reschedule_interview(
         await session.commit()
     except IntegrityError as error:
         await session.rollback()
-        raise SchedulingConflict(
-            "interviewer already has an overlapping active interview"
-        ) from error
+        message = _exclusion_conflict_message(error)
+        if message is not None:
+            raise SchedulingConflict(message) from error
+        logger.exception("unexpected integrity error while rescheduling interview")
+        raise
     await set_tenant_context(session, tenant_id)
     return await session.scalar(select(Interview).where(Interview.id == interview_id))
 

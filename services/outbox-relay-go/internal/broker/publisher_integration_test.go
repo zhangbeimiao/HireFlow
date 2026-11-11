@@ -66,3 +66,14 @@ func TestConnectRejectsUnavailableBroker(t *testing.T) {
 		t.Fatalf("unavailable broker error = %v", err)
 	}
 }
+
+func TestMandatoryPublishRejectsUnroutableMessage(t *testing.T) {
+	publisher := integrationPublisher(t)
+	publisher.routingKey = "hireflow.events.missing." + uuid.NewString()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err := publisher.Publish(ctx, integrationEvent())
+	if err == nil || !strings.Contains(err.Error(), "unroutable") {
+		t.Fatalf("mandatory unroutable publish error = %v", err)
+	}
+}

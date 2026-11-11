@@ -220,6 +220,7 @@ jobs:
         env:
           HIREFLOW_INTEGRATION_BASE_URL: http://127.0.0.1:8000
           HIREFLOW_MAILPIT_BASE_URL: http://127.0.0.1:8025
+          HIREFLOW_TEST_DATABASE_URL: postgresql://hireflow:hireflow_ci_only@localhost:5432/hireflow
         run: python -m pytest -q -m integration tests/integration
 
       - name: Verify duplicate ATS notification delivery is idempotent

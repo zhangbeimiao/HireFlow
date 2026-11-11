@@ -63,6 +63,8 @@ services:
       HIREFLOW_REFRESH_TOKEN_DAYS: ${HIREFLOW_REFRESH_TOKEN_DAYS:-14}
       HIREFLOW_COOKIE_SECURE: ${HIREFLOW_COOKIE_SECURE:-false}
       HIREFLOW_ALLOWED_HOSTS: ${HIREFLOW_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      # Forwarded client IPs are trusted only when the immediate peer belongs to this list.
+      HIREFLOW_TRUSTED_PROXIES: ${HIREFLOW_TRUSTED_PROXIES:-}
       HIREFLOW_REDIS_URL: redis://redis:6379/0
       HIREFLOW_LIST_CACHE_TTL_SECONDS: 60
     ports:

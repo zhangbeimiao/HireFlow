@@ -33,8 +33,20 @@ func TestLoadRequiresDependencyURLs(t *testing.T) {
 }
 
 func TestLoadRejectsInvalidValues(t *testing.T) {
+	t.Setenv("HIREFLOW_DATABASE_URL", "postgresql://test")
+	t.Setenv("HIREFLOW_RABBITMQ_URL", "amqp://test")
 	t.Setenv("HIREFLOW_OUTBOX_BATCH_SIZE", "0")
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() accepted an invalid batch size")
+	}
+}
+
+func TestLoadRejectsLeaseShorterThanPublishSafetyWindow(t *testing.T) {
+	t.Setenv("HIREFLOW_DATABASE_URL", "postgresql://test")
+	t.Setenv("HIREFLOW_RABBITMQ_URL", "amqp://test")
+	t.Setenv("HIREFLOW_OUTBOX_LEASE_DURATION", "15s")
+	t.Setenv("HIREFLOW_PUBLISH_TIMEOUT", "5s")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() accepted a lease without a publish safety window")
 	}
 }

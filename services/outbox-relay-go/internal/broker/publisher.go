@@ -22,6 +22,8 @@ type Publisher struct {
 	connection *amqp091.Connection
 	channel    *amqp091.Channel
 	confirms   <-chan amqp091.Confirmation
+	returns    <-chan amqp091.Return
+	routingKey string
 	mu         sync.Mutex
 }
 
@@ -42,7 +44,7 @@ func Connect(url string) (*Publisher, error) {
 		_ = connection.Close()
 		return nil, fmt.Errorf("open RabbitMQ channel: %w", err)
 	}
-	publisher := &Publisher{connection: connection, channel: channel}
+	publisher := &Publisher{connection: connection, channel: channel, routingKey: EventQueue}
 	if err := publisher.declareTopology(); err != nil {
 		_ = publisher.Close()
 		return nil, err
@@ -52,6 +54,7 @@ func Connect(url string) (*Publisher, error) {
 		return nil, fmt.Errorf("enable publisher confirms: %w", err)
 	}
 	publisher.confirms = channel.NotifyPublish(make(chan amqp091.Confirmation, 1))
+	publisher.returns = channel.NotifyReturn(make(chan amqp091.Return, 1))
 	return publisher, nil
 }
 
@@ -81,27 +84,54 @@ func (p *Publisher) Publish(ctx context.Context, event outbox.Event) error {
 	if err != nil {
 		return fmt.Errorf("encode event: %w", err)
 	}
-	if err := p.channel.PublishWithContext(ctx, "", EventQueue, false, false, amqp091.Publishing{
+	if err := p.channel.PublishWithContext(ctx, "", p.routingKey, true, false, amqp091.Publishing{
 		ContentType: "application/json", DeliveryMode: amqp091.Persistent,
 		MessageId: event.ID.String(), Type: event.EventType, Body: body,
 	}); err != nil {
 		return fmt.Errorf("publish event: %w", err)
 	}
-	return awaitConfirmation(ctx, p.confirms)
+	return awaitPublishOutcome(ctx, p.confirms, p.returns)
 }
 
-func awaitConfirmation(ctx context.Context, confirms <-chan amqp091.Confirmation) error {
-	select {
-	case confirmation, ok := <-confirms:
-		if !ok {
-			return errors.New("publisher confirm channel closed")
+func awaitPublishOutcome(ctx context.Context, confirms <-chan amqp091.Confirmation, returns <-chan amqp091.Return) error {
+	var returned *amqp091.Return
+	for {
+		select {
+		case message, ok := <-returns:
+			if !ok {
+				returns = nil
+				continue
+			}
+			returned = &message
+		case confirmation, ok := <-confirms:
+			if !ok {
+				return errors.New("publisher confirm channel closed")
+			}
+			if !confirmation.Ack {
+				return errors.New("broker negatively acknowledged event")
+			}
+			// RabbitMQ sends basic.return before the confirm for a mandatory
+			// unroutable publish. Drain a return already queued in the client in
+			// case both notification channels became ready together.
+			if returned == nil && returns != nil {
+				select {
+				case message, ok := <-returns:
+					if ok {
+						returned = &message
+					}
+				default:
+				}
+			}
+			if returned != nil {
+				return fmt.Errorf("broker returned unroutable event: code=%d text=%s routing_key=%s", returned.ReplyCode, returned.ReplyText, returned.RoutingKey)
+			}
+			return nil
+		case <-ctx.Done():
+			if returned != nil {
+				return fmt.Errorf("broker returned unroutable event before confirm timeout: code=%d text=%s routing_key=%s", returned.ReplyCode, returned.ReplyText, returned.RoutingKey)
+			}
+			return fmt.Errorf("wait for publisher confirm: %w", ctx.Err())
 		}
-		if !confirmation.Ack {
-			return errors.New("broker negatively acknowledged event")
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("wait for publisher confirm: %w", ctx.Err())
 	}
 }
 
